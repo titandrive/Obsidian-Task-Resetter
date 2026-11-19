@@ -30,7 +30,7 @@ module.exports = __toCommonJS(main_exports);
 var import_obsidian = require("obsidian");
 var DEFAULTS = { clearOtherMarkers: false };
 var TASK = /^(\s*(?:[-*+]|\d+[.)])\s+\[)([^\]])(\])/;
-var HEADING = /^#{1,6}\s/;
+var HEADING = /^(#{1,6})\s/;
 var TaskResetter = class extends import_obsidian.Plugin {
   constructor() {
     super(...arguments);
@@ -72,7 +72,7 @@ var TaskResetter = class extends import_obsidian.Plugin {
           if (!(file instanceof import_obsidian.TFile))
             return;
           const info = ctx.getSectionInfo(el);
-          void this.reset(file, whole || !info ? void 0 : info.lineEnd + 1);
+          void this.reset(file, whole || !info ? void 0 : info.lineEnd);
         };
       });
     } catch (e) {
@@ -87,35 +87,53 @@ var TaskResetter = class extends import_obsidian.Plugin {
     return this.settings.clearOtherMarkers || m[2] === "x" || m[2] === "X";
   }
   /**
-   * Lines to clear: the whole note, or (from `start`) the lines down to the next heading. Fenced code
-   * is skipped, so task-like lines in code examples are left alone.
+   * Lines to clear. Without `blockEnd`, the whole note. With it (the last line of a button's block):
+   * the section of the heading the button sits under, from the button down to the next heading of the
+   * same or a higher level, subheadings included; or the whole note if no heading is above it. Fenced
+   * code is skipped, so task-like lines in code examples are left alone.
    */
-  targets(lines, start) {
-    const out = [];
+  targets(lines, blockEnd) {
+    const fenced = [];
     let fence = false;
-    for (let i = start != null ? start : 0; i < lines.length; i++) {
-      if (/^\s*(```|~~~)/.test(lines[i])) {
+    for (const line of lines) {
+      const marker = /^\s*(```|~~~)/.test(line);
+      if (marker)
         fence = !fence;
-        continue;
-      }
-      if (fence)
-        continue;
-      if (start !== void 0 && HEADING.test(lines[i]))
-        break;
-      if (this.clears(lines[i]))
-        out.push(i);
+      fenced.push(fence || marker);
     }
+    const level = (i) => {
+      var _a, _b;
+      return fenced[i] ? 0 : (_b = (_a = HEADING.exec(lines[i])) == null ? void 0 : _a[1].length) != null ? _b : 0;
+    };
+    let from = 0, to = lines.length;
+    if (blockEnd !== void 0) {
+      let own = 0;
+      for (let i = blockEnd; i >= 0 && !own; i--)
+        own = level(i);
+      if (own) {
+        from = blockEnd + 1;
+        for (let i = from; i < lines.length; i++)
+          if (level(i) && level(i) <= own) {
+            to = i;
+            break;
+          }
+      }
+    }
+    const out = [];
+    for (let i = from; i < to; i++)
+      if (!fenced[i] && this.clears(lines[i]))
+        out.push(i);
     return out;
   }
   /** Uncheck the tasks: through the editor when the note is open there (so it's one undo), else in the file. */
-  async reset(file, start) {
+  async reset(file, blockEnd) {
     const editor = this.editorFor(file);
     let count = 0;
     let before = "", after = "";
     if (editor) {
       before = editor.getValue();
       const lines = before.split("\n");
-      const hits = this.targets(lines, start);
+      const hits = this.targets(lines, blockEnd);
       count = hits.length;
       if (count) {
         editor.transaction({
@@ -132,7 +150,7 @@ var TaskResetter = class extends import_obsidian.Plugin {
       await this.app.vault.process(file, (text) => {
         before = text;
         const lines = text.split("\n");
-        const hits = this.targets(lines, start);
+        const hits = this.targets(lines, blockEnd);
         count = hits.length;
         for (const line of hits)
           lines[line] = lines[line].replace(TASK, "$1 $3");
@@ -198,9 +216,9 @@ var TaskResetterSettings = class extends import_obsidian.PluginSettingTab {
     }));
     new import_obsidian.Setting(containerEl).setName("Button in a note").setHeading();
     new import_obsidian.Setting(containerEl).setDesc(createFragment((f) => {
-      f.appendText("Add a code block named reset-tasks anywhere in a note. Its button unchecks the list under it, down to the next heading. Write ");
+      f.appendText("Add a code block named reset-tasks anywhere in a note. Under a heading, its button unchecks that heading's section (subheadings included). Above any heading, or with ");
       f.createEl("code", { text: "all" });
-      f.appendText(" inside the block to reset the whole note instead.");
+      f.appendText(" written inside it, it unchecks the whole note.");
     }));
   }
 };

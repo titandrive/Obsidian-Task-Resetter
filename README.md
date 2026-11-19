@@ -13,7 +13,11 @@ Uncheck the tasks in a note, so a checklist can be used again.
   ```
   ````
 
-  It shows a **Reset tasks** button that unchecks only the list under it, down to the next heading, so a note with several lists can have a button for each. Write `all` inside the block to make it reset the whole note instead.
+  It shows a **Reset tasks** button. Where you put it decides what it resets:
+
+  - **Under a heading:** that heading's section, from the button down to the next heading of the same or a higher level. Subheadings are included, so a button under `## Morning` also resets a `### Extras` inside it. A note with several lists can have a button for each.
+  - **Above any heading:** the whole note.
+  - **With `all` written inside the block:** the whole note, wherever it is.
 
 ## Details
 

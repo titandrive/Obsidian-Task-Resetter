@@ -4,8 +4,9 @@ import { App, Editor, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, s
  * Task Resetter: uncheck the tasks in a note, so a checklist can be used again.
  *
  * - The "Reset tasks in this note" command (give it a hotkey) and a sidebar button do the whole note.
- * - A reset-tasks code block puts a button in the note that resets just the list under it, down to
- *   the next heading. Write `all` inside the block to make it reset the whole note instead.
+ * - A reset-tasks code block puts a button in the note. Under a heading, it resets that heading's
+ *   section (subheadings included, up to the next heading of the same or a higher level). Above any
+ *   heading, or with `all` written inside it, it resets the whole note.
  *
  * When the note is open in the editor, the reset is one edit, so Ctrl/Cmd+Z puts every check back
  * (focus goes back to the text afterwards, so it works straight away). The notice also has an Undo.
@@ -22,7 +23,7 @@ const DEFAULTS: Settings = { clearOtherMarkers: false };
 const TASK = /^(\s*(?:[-*+]|\d+[.)])\s+\[)([^\]])(\])/;
 
 /** A Markdown heading line (outside code blocks; callers skip fenced code). */
-const HEADING = /^#{1,6}\s/;
+const HEADING = /^(#{1,6})\s/;
 
 export default class TaskResetter extends Plugin {
 	settings: Settings = DEFAULTS;
@@ -63,7 +64,7 @@ export default class TaskResetter extends Plugin {
 					if (!(file instanceof TFile)) return;
 					// Where the block is now (the note may have changed since it was drawn).
 					const info = ctx.getSectionInfo(el);
-					void this.reset(file, whole || !info ? undefined : info.lineEnd + 1);
+					void this.reset(file, whole || !info ? undefined : info.lineEnd);
 				};
 			});
 		} catch (e) {
@@ -79,30 +80,43 @@ export default class TaskResetter extends Plugin {
 	}
 
 	/**
-	 * Lines to clear: the whole note, or (from `start`) the lines down to the next heading. Fenced code
-	 * is skipped, so task-like lines in code examples are left alone.
+	 * Lines to clear. Without `blockEnd`, the whole note. With it (the last line of a button's block):
+	 * the section of the heading the button sits under, from the button down to the next heading of the
+	 * same or a higher level, subheadings included; or the whole note if no heading is above it. Fenced
+	 * code is skipped, so task-like lines in code examples are left alone.
 	 */
-	private targets(lines: string[], start?: number): number[] {
-		const out: number[] = [];
+	private targets(lines: string[], blockEnd?: number): number[] {
+		const fenced: boolean[] = [];
 		let fence = false;
-		for (let i = start ?? 0; i < lines.length; i++) {
-			if (/^\s*(```|~~~)/.test(lines[i])) { fence = !fence; continue; }
-			if (fence) continue;
-			if (start !== undefined && HEADING.test(lines[i])) break;
-			if (this.clears(lines[i])) out.push(i);
+		for (const line of lines) {
+			const marker = /^\s*(```|~~~)/.test(line);
+			if (marker) fence = !fence;
+			fenced.push(fence || marker);
 		}
+		const level = (i: number) => (fenced[i] ? 0 : HEADING.exec(lines[i])?.[1].length ?? 0);
+		let from = 0, to = lines.length;
+		if (blockEnd !== undefined) {
+			let own = 0;
+			for (let i = blockEnd; i >= 0 && !own; i--) own = level(i);
+			if (own) {
+				from = blockEnd + 1;
+				for (let i = from; i < lines.length; i++) if (level(i) && level(i) <= own) { to = i; break; }
+			}
+		}
+		const out: number[] = [];
+		for (let i = from; i < to; i++) if (!fenced[i] && this.clears(lines[i])) out.push(i);
 		return out;
 	}
 
 	/** Uncheck the tasks: through the editor when the note is open there (so it's one undo), else in the file. */
-	async reset(file: TFile, start?: number): Promise<void> {
+	async reset(file: TFile, blockEnd?: number): Promise<void> {
 		const editor = this.editorFor(file);
 		let count = 0;
 		let before = "", after = "";
 		if (editor) {
 			before = editor.getValue();
 			const lines = before.split("\n");
-			const hits = this.targets(lines, start);
+			const hits = this.targets(lines, blockEnd);
 			count = hits.length;
 			if (count) {
 				editor.transaction({
@@ -121,7 +135,7 @@ export default class TaskResetter extends Plugin {
 			await this.app.vault.process(file, (text) => {
 				before = text;
 				const lines = text.split("\n");
-				const hits = this.targets(lines, start);
+				const hits = this.targets(lines, blockEnd);
 				count = hits.length;
 				for (const line of hits) lines[line] = lines[line].replace(TASK, "$1 $3");
 				return (after = lines.join("\n"));
@@ -185,9 +199,9 @@ class TaskResetterSettings extends PluginSettingTab {
 			}));
 		new Setting(containerEl).setName("Button in a note").setHeading();
 		new Setting(containerEl).setDesc(createFragment((f) => {
-			f.appendText("Add a code block named reset-tasks anywhere in a note. Its button unchecks the list under it, down to the next heading. Write ");
+			f.appendText("Add a code block named reset-tasks anywhere in a note. Under a heading, its button unchecks that heading's section (subheadings included). Above any heading, or with ");
 			f.createEl("code", { text: "all" });
-			f.appendText(" inside the block to reset the whole note instead.");
+			f.appendText(" written inside it, it unchecks the whole note.");
 		}));
 	}
 }
