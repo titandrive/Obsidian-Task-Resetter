@@ -3,3 +3,6 @@
 button.reset-tasks-button { display: inline-flex; align-items: center; gap: .4em; height: auto; padding: .3em .75em; font-size: var(--font-ui-small); border-radius: var(--radius-s); cursor: pointer; }
 .reset-tasks-icon { display: flex; }
 .reset-tasks-icon svg { width: 14px; height: 14px; }
+/* Icon-only buttons (setting): just the small square. */
+.task-resetter-icon-only .reset-tasks-label { display: none; }
+.task-resetter-icon-only button.reset-tasks-button { padding: .3em .4em; }

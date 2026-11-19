@@ -30,7 +30,8 @@ module.exports = __toCommonJS(main_exports);
 var import_obsidian = require("obsidian");
 var import_state = require("@codemirror/state");
 var import_view = require("@codemirror/view");
-var DEFAULTS = { clearOtherMarkers: false, haptics: true };
+var DEFAULTS = { clearOtherMarkers: false, haptics: true, hideLabel: false };
+var ICON = "square-check-big";
 var TASK = /^(\s*(?:[-*+]|\d+[.)])\s+\[)([^\]])(\])/;
 var MARKER = /\[reset-tasks( all)?\]/gi;
 var HEADING = /^(#{1,6})\s/;
@@ -43,6 +44,7 @@ var TaskResetter = class extends import_obsidian.Plugin {
     var _a;
     this.settings = { ...DEFAULTS, ...(_a = await this.loadData()) != null ? _a : {} };
     this.addSettingTab(new TaskResetterSettings(this.app, this));
+    this.applyLabel();
     this.addCommand({
       id: "reset-note",
       name: "Reset tasks in this note",
@@ -99,7 +101,7 @@ var TaskResetter = class extends import_obsidian.Plugin {
         node.replaceWith(frag);
       }
     });
-    this.addRibbonIcon("list-restart", "Reset tasks in this note", () => {
+    this.addRibbonIcon(ICON, "Reset tasks in this note", () => {
       this.tap();
       const file = this.app.workspace.getActiveFile();
       if (!file || file.extension !== "md") {
@@ -132,8 +134,10 @@ var TaskResetter = class extends import_obsidian.Plugin {
   /** The Reset button (the block's, and the [reset-tasks] marker's). */
   button(whole, onClick) {
     const button = createEl("button", { cls: "reset-tasks-button" });
-    (0, import_obsidian.setIcon)(button.createSpan({ cls: "reset-tasks-icon" }), "list-restart");
-    button.createSpan({ text: whole ? "Reset all tasks" : "Reset tasks" });
+    const label = whole ? "Reset all tasks" : "Reset tasks";
+    (0, import_obsidian.setIcon)(button.createSpan({ cls: "reset-tasks-icon" }), ICON);
+    button.createSpan({ cls: "reset-tasks-label", text: label });
+    button.setAttr("aria-label", label);
     button.addEventListener("mousedown", (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -282,6 +286,13 @@ var TaskResetter = class extends import_obsidian.Plugin {
   async saveSettings() {
     await this.saveData(this.settings);
   }
+  /** Icon-only buttons: a class on the page, so buttons already on screen change at once. */
+  applyLabel() {
+    document.body.toggleClass("task-resetter-icon-only", this.settings.hideLabel);
+  }
+  onunload() {
+    document.body.removeClass("task-resetter-icon-only");
+  }
 };
 var TaskResetterSettings = class extends import_obsidian.PluginSettingTab {
   constructor(app, plugin) {
@@ -297,6 +308,11 @@ var TaskResetterSettings = class extends import_obsidian.PluginSettingTab {
     }));
     new import_obsidian.Setting(containerEl).setName("Haptic tap (mobile)").setDesc("A light tap when you tap a reset button or the sidebar button.").addToggle((t) => t.setValue(this.plugin.settings.haptics).onChange(async (v) => {
       this.plugin.settings.haptics = v;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian.Setting(containerEl).setName("Hide the button label").setDesc('Show the buttons in notes as just the icon, without "Reset tasks".').addToggle((t) => t.setValue(this.plugin.settings.hideLabel).onChange(async (v) => {
+      this.plugin.settings.hideLabel = v;
+      this.plugin.applyLabel();
       await this.plugin.saveSettings();
     }));
     new import_obsidian.Setting(containerEl).setName("Button in a note").setHeading();

@@ -21,9 +21,14 @@ interface Settings {
 	clearOtherMarkers: boolean;
 	/** On phones: a light haptic tap when a reset button or the sidebar button is tapped. */
 	haptics: boolean;
+	/** Show the in-note buttons as just the icon, without "Reset tasks". */
+	hideLabel: boolean;
 }
 
-const DEFAULTS: Settings = { clearOtherMarkers: false, haptics: true };
+const DEFAULTS: Settings = { clearOtherMarkers: false, haptics: true, hideLabel: false };
+
+/** The buttons' icon. */
+const ICON = "square-check-big";
 
 /** A task line: indentation, a list marker, then [ ] with something in the box. */
 const TASK = /^(\s*(?:[-*+]|\d+[.)])\s+\[)([^\]])(\])/;
@@ -40,6 +45,7 @@ export default class TaskResetter extends Plugin {
 	async onload(): Promise<void> {
 		this.settings = { ...DEFAULTS, ...((await this.loadData()) ?? {}) };
 		this.addSettingTab(new TaskResetterSettings(this.app, this));
+		this.applyLabel();
 
 		this.addCommand({
 			id: "reset-note",
@@ -101,7 +107,7 @@ export default class TaskResetter extends Plugin {
 			}
 		});
 
-		this.addRibbonIcon("list-restart", "Reset tasks in this note", () => {
+		this.addRibbonIcon(ICON, "Reset tasks in this note", () => {
 			this.tap();
 			const file = this.app.workspace.getActiveFile();
 			if (!file || file.extension !== "md") { new Notice("Open a note to reset its tasks."); return; }
@@ -134,8 +140,11 @@ export default class TaskResetter extends Plugin {
 	/** The Reset button (the block's, and the [reset-tasks] marker's). */
 	button(whole: boolean, onClick: () => void): HTMLElement {
 		const button = createEl("button", { cls: "reset-tasks-button" });
-		setIcon(button.createSpan({ cls: "reset-tasks-icon" }), "list-restart");
-		button.createSpan({ text: whole ? "Reset all tasks" : "Reset tasks" });
+		const label = whole ? "Reset all tasks" : "Reset tasks";
+		setIcon(button.createSpan({ cls: "reset-tasks-icon" }), ICON);
+		button.createSpan({ cls: "reset-tasks-label", text: label });
+		// Named for screen readers and a hover tooltip, which matters when the label is hidden.
+		button.setAttr("aria-label", label);
 		// Keep the click from moving the editor's cursor onto the button's text.
 		button.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); });
 		button.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); this.tap(); onClick(); });
@@ -260,6 +269,15 @@ export default class TaskResetter extends Plugin {
 	async saveSettings(): Promise<void> {
 		await this.saveData(this.settings);
 	}
+
+	/** Icon-only buttons: a class on the page, so buttons already on screen change at once. */
+	applyLabel(): void {
+		document.body.toggleClass("task-resetter-icon-only", this.settings.hideLabel);
+	}
+
+	onunload(): void {
+		document.body.removeClass("task-resetter-icon-only");
+	}
 }
 
 class TaskResetterSettings extends PluginSettingTab {
@@ -282,6 +300,14 @@ class TaskResetterSettings extends PluginSettingTab {
 			.setDesc("A light tap when you tap a reset button or the sidebar button.")
 			.addToggle((t) => t.setValue(this.plugin.settings.haptics).onChange(async (v) => {
 				this.plugin.settings.haptics = v;
+				await this.plugin.saveSettings();
+			}));
+		new Setting(containerEl)
+			.setName("Hide the button label")
+			.setDesc("Show the buttons in notes as just the icon, without \"Reset tasks\".")
+			.addToggle((t) => t.setValue(this.plugin.settings.hideLabel).onChange(async (v) => {
+				this.plugin.settings.hideLabel = v;
+				this.plugin.applyLabel();
 				await this.plugin.saveSettings();
 			}));
 		new Setting(containerEl).setName("Button in a note").setHeading();
