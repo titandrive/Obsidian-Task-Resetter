@@ -252,7 +252,7 @@ var TaskResetter = class extends import_obsidian.Plugin {
         notice.hide();
         void this.undo(file, before, after);
       };
-    }), 6e3);
+    }), 5e3);
   }
   /** Put the note back as it was before a reset, unless it has been changed since. */
   async undo(file, before, after) {
