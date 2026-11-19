@@ -27,9 +27,11 @@ interface Settings {
 	hideLabel: boolean;
 	/** Dim a button when there's nothing checked for it to reset. */
 	dimWhenEmpty: boolean;
+	/** The "Unchecked N tasks" notice after a reset: always, only on phones, or never. */
+	notice: "on" | "mobile" | "off";
 }
 
-const DEFAULTS: Settings = { clearOtherMarkers: false, haptics: true, hideLabel: false, dimWhenEmpty: true };
+const DEFAULTS: Settings = { clearOtherMarkers: false, haptics: true, hideLabel: false, dimWhenEmpty: true, notice: "on" };
 
 /** The buttons' icon. */
 const ICON = "rotate-ccw-square";
@@ -351,7 +353,10 @@ export default class TaskResetter extends Plugin {
 			new Notice(scope.kind === "level" ? `No H${scope.level} headings in this note.` : `No heading named "${scope.kind === "named" ? scope.name : ""}" in this note.`);
 			return;
 		}
-		if (!count) { new Notice("Nothing to uncheck."); return; }
+		// The notices after a reset, as the setting says (errors above always show).
+		const show = this.settings.notice === "on" || (this.settings.notice === "mobile" && Platform.isMobile);
+		if (!count) { if (show) new Notice("Nothing to uncheck."); return; }
+		if (!show) return;
 		// The notice has an Undo too (works in reading view, where there's no editor to undo in).
 		const notice = new Notice(createFragment((f) => {
 			f.appendText(`Unchecked ${count} task${count === 1 ? "" : "s"}. `);
@@ -445,6 +450,18 @@ class TaskResetterSettings extends PluginSettingTab {
 				await this.plugin.saveSettings();
 				this.plugin.redrawButtons();
 			}));
+		new Setting(containerEl)
+			.setName("Notice after a reset")
+			.setDesc("The \"Unchecked N tasks\" message, with its Undo link. Ctrl/Cmd+Z undoes a reset in the editor either way.")
+			.addDropdown((d) => d
+				.addOption("on", "On")
+				.addOption("mobile", "Only on mobile")
+				.addOption("off", "Off")
+				.setValue(this.plugin.settings.notice)
+				.onChange(async (v) => {
+					this.plugin.settings.notice = v as Settings["notice"];
+					await this.plugin.saveSettings();
+				}));
 		new Setting(containerEl).setName("Button in a note").setHeading();
 		new Setting(containerEl).setDesc(createFragment((f) => {
 			f.appendText("Type ");

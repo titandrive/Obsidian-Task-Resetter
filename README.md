@@ -89,6 +89,7 @@ Here **Reset the week** clears all of Weekdays, the sunrise button clears Mornin
 - **Dim when there's nothing to reset** (in settings, on by default) fades a button when none of the tasks it covers are checked. It still works when tapped.
 - On phones, tapping a reset button gives a light haptic tap (**Haptic tap** in settings turns it off).
 - **Also clear other markers** (in settings, off by default) resets markers like `[-]` and `[/]` too.
+- **Notice after a reset** (in settings): **On** (the default), **Only on mobile**, or **Off**. It's the "Unchecked N tasks" message with the Undo link.
 - Undo: when the note is open in the editor, a reset is one edit, so Ctrl/Cmd+Z puts every check back. The notice that says how many were unchecked also has an **Undo** link, which works in reading view too.
 
 ## Install

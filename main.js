@@ -30,7 +30,7 @@ module.exports = __toCommonJS(main_exports);
 var import_obsidian = require("obsidian");
 var import_state = require("@codemirror/state");
 var import_view = require("@codemirror/view");
-var DEFAULTS = { clearOtherMarkers: false, haptics: true, hideLabel: false, dimWhenEmpty: true };
+var DEFAULTS = { clearOtherMarkers: false, haptics: true, hideLabel: false, dimWhenEmpty: true, notice: "on" };
 var ICON = "rotate-ccw-square";
 var TASK = /^(\s*(?:[-*+]|\d+[.)])\s+\[)([^\]])(\])/;
 var MARKER = /\[reset-tasks(?=[\s:\]])([^\]\n]*)\]/gi;
@@ -360,10 +360,14 @@ var TaskResetter = class extends import_obsidian.Plugin {
       new import_obsidian.Notice(scope.kind === "level" ? `No H${scope.level} headings in this note.` : `No heading named "${scope.kind === "named" ? scope.name : ""}" in this note.`);
       return;
     }
+    const show = this.settings.notice === "on" || this.settings.notice === "mobile" && import_obsidian.Platform.isMobile;
     if (!count) {
-      new import_obsidian.Notice("Nothing to uncheck.");
+      if (show)
+        new import_obsidian.Notice("Nothing to uncheck.");
       return;
     }
+    if (!show)
+      return;
     const notice = new import_obsidian.Notice(createFragment((f) => {
       f.appendText(`Unchecked ${count} task${count === 1 ? "" : "s"}. `);
       const undo = f.createEl("a", { text: "Undo", href: "#" });
@@ -444,6 +448,10 @@ var TaskResetterSettings = class extends import_obsidian.PluginSettingTab {
       this.plugin.settings.dimWhenEmpty = v;
       await this.plugin.saveSettings();
       this.plugin.redrawButtons();
+    }));
+    new import_obsidian.Setting(containerEl).setName("Notice after a reset").setDesc('The "Unchecked N tasks" message, with its Undo link. Ctrl/Cmd+Z undoes a reset in the editor either way.').addDropdown((d) => d.addOption("on", "On").addOption("mobile", "Only on mobile").addOption("off", "Off").setValue(this.plugin.settings.notice).onChange(async (v) => {
+      this.plugin.settings.notice = v;
+      await this.plugin.saveSettings();
     }));
     new import_obsidian.Setting(containerEl).setName("Button in a note").setHeading();
     new import_obsidian.Setting(containerEl).setDesc(createFragment((f) => {
