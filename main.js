@@ -230,7 +230,8 @@ var TaskResetter = class extends import_obsidian.Plugin {
         });
         after = editor.getValue();
       }
-      editor.focus();
+      if (!import_obsidian.Platform.isMobile)
+        editor.focus();
     } else {
       await this.app.vault.process(file, (text) => {
         before = text;
@@ -265,7 +266,8 @@ var TaskResetter = class extends import_obsidian.Plugin {
         return;
       }
       editor.undo();
-      editor.focus();
+      if (!import_obsidian.Platform.isMobile)
+        editor.focus();
       return;
     }
     let changed = false;

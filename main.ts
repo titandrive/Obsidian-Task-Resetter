@@ -218,8 +218,9 @@ export default class TaskResetter extends Plugin {
 				after = editor.getValue();
 			}
 			// A click on the in-note button leaves focus on the button, where Ctrl/Cmd+Z doesn't reach
-			// the editor: put it back in the text so undo works right away.
-			editor.focus();
+			// the editor: put it back in the text so undo works right away. Not on phones, where that would
+			// open the keyboard (the notice's Undo is there instead).
+			if (!Platform.isMobile) editor.focus();
 		} else {
 			await this.app.vault.process(file, (text) => {
 				before = text;
@@ -249,7 +250,7 @@ export default class TaskResetter extends Plugin {
 		if (editor) {
 			if (editor.getValue() !== after) { new Notice("The note has changed since; use Ctrl/Cmd+Z instead."); return; }
 			editor.undo();
-			editor.focus();
+			if (!Platform.isMobile) editor.focus();
 			return;
 		}
 		let changed = false;
