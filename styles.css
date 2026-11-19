@@ -36,5 +36,5 @@ button.reset-tasks-button:active { background: var(--background-modifier-active-
 .reset-tasks-icon-suggestion svg { width: 16px; height: 16px; }
 
 /* Nothing checked for it to reset: faded (setting), still clickable. */
-button.reset-tasks-button.is-empty { opacity: .45; }
-button.reset-tasks-button.is-empty:hover { opacity: .8; }
+button.reset-tasks-button.is-empty { opacity: .6; }
+button.reset-tasks-button.is-empty:hover { opacity: .85; }
