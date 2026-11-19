@@ -30,7 +30,7 @@ module.exports = __toCommonJS(main_exports);
 var import_obsidian = require("obsidian");
 var import_state = require("@codemirror/state");
 var import_view = require("@codemirror/view");
-var DEFAULTS = { clearOtherMarkers: false, haptics: true, hideLabel: false };
+var DEFAULTS = { clearOtherMarkers: false, haptics: true, hideLabel: false, dimWhenEmpty: true };
 var ICON = "rotate-ccw-square";
 var TASK = /^(\s*(?:[-*+]|\d+[.)])\s+\[)([^\]])(\])/;
 var MARKER = /\[reset-tasks(?=[\s:\]])([^\]\n]*)\]/gi;
@@ -81,11 +81,19 @@ function labelOf(scope) {
 function headingText(line) {
   return line.replace(/^#{1,6}\s+/, "").replace(MARKER, "").replace(/\s+#+\s*$/, "").trim().toLowerCase();
 }
+function markerLine(lines, from, to) {
+  for (let i = from; i <= to && i < lines.length; i++)
+    if (/\[reset-tasks/i.test(lines[i]))
+      return i;
+  return from;
+}
 var HEADING = /^(#{1,6})\s/;
 var TaskResetter = class extends import_obsidian.Plugin {
   constructor() {
     super(...arguments);
     this.settings = DEFAULTS;
+    /** Reading view's buttons, to dim and undim as their notes change. */
+    this.reading = /* @__PURE__ */ new Set();
   }
   async onload() {
     var _a;
@@ -136,16 +144,28 @@ var TaskResetter = class extends import_obsidian.Plugin {
             continue;
           const scope = marker.scope;
           frag.append(text.slice(last, m.index));
-          frag.append(this.button(marker, () => {
+          const button = this.button(marker, () => {
             const info = ctx.getSectionInfo(el);
             void this.resetAtMarker(file, scope, info ? info.lineStart : void 0, info ? info.lineEnd : void 0);
-          }));
+          });
+          frag.append(button);
+          const entry = { button, file, scope, section: () => ctx.getSectionInfo(el) };
+          this.reading.add(entry);
+          void this.dimReading(entry);
           last = ((_d = m.index) != null ? _d : 0) + m[0].length;
         }
         frag.append(text.slice(last));
         node.replaceWith(frag);
       }
     });
+    this.registerEvent(this.app.vault.on("modify", (f) => {
+      for (const entry of this.reading) {
+        if (!entry.button.isConnected)
+          this.reading.delete(entry);
+        else if (entry.file === f)
+          void this.dimReading(entry);
+      }
+    }));
     this.addRibbonIcon(ICON, "Reset tasks in this note", () => {
       this.tap();
       const file = this.app.workspace.getActiveFile();
@@ -214,13 +234,20 @@ var TaskResetter = class extends import_obsidian.Plugin {
     if (from === void 0 || to === void 0)
       return this.reset(file, { kind: "all" });
     const lines = (await this.app.vault.cachedRead(file)).split("\n");
-    let at = from;
-    for (let i = from; i <= to && i < lines.length; i++)
-      if (/\[reset-tasks/i.test(lines[i])) {
-        at = i;
-        break;
-      }
-    return this.reset(file, scope, at);
+    return this.reset(file, scope, markerLine(lines, from, to));
+  }
+  /** Dim a reading-view button if it has nothing to reset. */
+  async dimReading(entry) {
+    const lines = (await this.app.vault.cachedRead(entry.file)).split("\n");
+    const info = entry.section();
+    const at = entry.scope.kind === "here" ? info ? markerLine(lines, info.lineStart, info.lineEnd) : void 0 : void 0;
+    const scope = entry.scope.kind === "here" && at === void 0 ? { kind: "all" } : entry.scope;
+    entry.button.toggleClass("is-empty", this.isEmpty(lines, scope, at));
+  }
+  /** Whether a button would find nothing to reset (and the setting to dim it is on). */
+  isEmpty(lines, scope, at) {
+    var _a;
+    return this.settings.dimWhenEmpty && !((_a = this.targets(lines, scope, at)) == null ? void 0 : _a.length);
   }
   /** The box's mark, if this line is a task that should be cleared. */
   clears(line) {
@@ -379,6 +406,12 @@ var TaskResetter = class extends import_obsidian.Plugin {
     await this.saveData(this.settings);
   }
   /** Icon-only buttons: a class on the page, so buttons already on screen change at once. */
+  /** Redraw the buttons after a setting that changes how they look. */
+  redrawButtons() {
+    this.app.workspace.updateOptions();
+    for (const entry of this.reading)
+      void this.dimReading(entry);
+  }
   applyLabel() {
     document.body.toggleClass("task-resetter-icon-only", this.settings.hideLabel);
   }
@@ -407,6 +440,11 @@ var TaskResetterSettings = class extends import_obsidian.PluginSettingTab {
       this.plugin.applyLabel();
       await this.plugin.saveSettings();
     }));
+    new import_obsidian.Setting(containerEl).setName("Dim when there's nothing to reset").setDesc("Fade a button when none of the tasks it covers are checked.").addToggle((t) => t.setValue(this.plugin.settings.dimWhenEmpty).onChange(async (v) => {
+      this.plugin.settings.dimWhenEmpty = v;
+      await this.plugin.saveSettings();
+      this.plugin.redrawButtons();
+    }));
     new import_obsidian.Setting(containerEl).setName("Button in a note").setHeading();
     new import_obsidian.Setting(containerEl).setDesc(createFragment((f) => {
       f.appendText("Type ");
@@ -422,23 +460,26 @@ var TaskResetterSettings = class extends import_obsidian.PluginSettingTab {
   }
 };
 var MarkerWidget = class extends import_view.WidgetType {
-  constructor(plugin, marker, line, length) {
+  constructor(plugin, marker, line, length, empty) {
     super();
     this.plugin = plugin;
     this.marker = marker;
     this.line = line;
     this.length = length;
+    this.empty = empty;
   }
   eq(other) {
-    return JSON.stringify(other.marker) === JSON.stringify(this.marker) && other.line === this.line && other.length === this.length;
+    return JSON.stringify(other.marker) === JSON.stringify(this.marker) && other.line === this.line && other.length === this.length && other.empty === this.empty;
   }
   toDOM(view) {
-    return this.plugin.button(this.marker, () => {
+    const button = this.plugin.button(this.marker, () => {
       var _a;
       const file = (_a = view.state.field(import_obsidian.editorInfoField)) == null ? void 0 : _a.file;
       if (file)
         void this.plugin.reset(file, this.marker.scope, this.line);
     });
+    button.toggleClass("is-empty", this.empty);
+    return button;
   }
 };
 function markerButtons(plugin) {
@@ -449,6 +490,8 @@ function markerButtons(plugin) {
       return builder.finish();
     const doc = view.state.doc;
     const sel = view.state.selection.ranges;
+    let split = null;
+    const lines = () => split != null ? split : split = doc.toString().split("\n");
     let fence = false;
     const fenced = /* @__PURE__ */ new Set();
     for (let n = 1; n <= doc.lines; n++) {
@@ -473,7 +516,7 @@ function markerButtons(plugin) {
             continue;
           if (sel.some((r) => r.from <= line.to && r.to >= line.from))
             continue;
-          builder.add(start, end, import_view.Decoration.replace({ widget: new MarkerWidget(plugin, marker, n - 1, m[0].length) }));
+          builder.add(start, end, import_view.Decoration.replace({ widget: new MarkerWidget(plugin, marker, n - 1, m[0].length, plugin.isEmpty(lines(), marker.scope, n - 1)) }));
         }
       }
     }

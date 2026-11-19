@@ -86,6 +86,7 @@ Here **Reset the week** clears all of Weekdays, the sunrise button clears Mornin
 
 - Unchecks `[x]` and `[X]`, including nested and numbered tasks. Tasks inside code blocks are left alone.
 - **Hide the button label** (in settings) shows the buttons in notes as just the icon.
+- **Dim when there's nothing to reset** (in settings, on by default) fades a button when none of the tasks it covers are checked. It still works when tapped.
 - On phones, tapping a reset button gives a light haptic tap (**Haptic tap** in settings turns it off).
 - **Also clear other markers** (in settings, off by default) resets markers like `[-]` and `[/]` too.
 - Undo: when the note is open in the editor, a reset is one edit, so Ctrl/Cmd+Z puts every check back. The notice that says how many were unchecked also has an **Undo** link, which works in reading view too.

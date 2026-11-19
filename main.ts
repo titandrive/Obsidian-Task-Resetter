@@ -25,9 +25,11 @@ interface Settings {
 	haptics: boolean;
 	/** Show the in-note buttons as just the icon, without "Reset tasks". */
 	hideLabel: boolean;
+	/** Dim a button when there's nothing checked for it to reset. */
+	dimWhenEmpty: boolean;
 }
 
-const DEFAULTS: Settings = { clearOtherMarkers: false, haptics: true, hideLabel: false };
+const DEFAULTS: Settings = { clearOtherMarkers: false, haptics: true, hideLabel: false, dimWhenEmpty: true };
 
 /** The buttons' icon. */
 const ICON = "rotate-ccw-square";
@@ -92,6 +94,12 @@ function headingText(line: string): string {
 	return line.replace(/^#{1,6}\s+/, "").replace(MARKER, "").replace(/\s+#+\s*$/, "").trim().toLowerCase();
 }
 
+/** The first line from `from` to `to` with a marker on it (reading view knows only the section), or `from`. */
+function markerLine(lines: string[], from: number, to: number): number {
+	for (let i = from; i <= to && i < lines.length; i++) if (/\[reset-tasks/i.test(lines[i])) return i;
+	return from;
+}
+
 /** A Markdown heading line (outside code blocks; callers skip fenced code). */
 const HEADING = /^(#{1,6})\s/;
 
@@ -148,17 +156,30 @@ export default class TaskResetter extends Plugin {
 					if (!marker) continue;
 					const scope = marker.scope;
 					frag.append(text.slice(last, m.index));
-					frag.append(this.button(marker, () => {
+					const button = this.button(marker, () => {
 						// Which line: the section this element came from, at the marker's line in it.
 						const info = ctx.getSectionInfo(el);
 						void this.resetAtMarker(file, scope, info ? info.lineStart : undefined, info ? info.lineEnd : undefined);
-					}));
+					});
+					frag.append(button);
+					// Dimmed when there's nothing to reset; looked at again whenever the note changes.
+					const entry = { button, file, scope, section: () => ctx.getSectionInfo(el) };
+					this.reading.add(entry);
+					void this.dimReading(entry);
 					last = (m.index ?? 0) + m[0].length;
 				}
 				frag.append(text.slice(last));
 				node.replaceWith(frag);
 			}
 		});
+
+		// Reading view's buttons follow the note as its tasks are checked and unchecked.
+		this.registerEvent(this.app.vault.on("modify", (f) => {
+			for (const entry of this.reading) {
+				if (!entry.button.isConnected) this.reading.delete(entry);
+				else if (entry.file === f) void this.dimReading(entry);
+			}
+		}));
 
 		this.addRibbonIcon(ICON, "Reset tasks in this note", () => {
 			this.tap();
@@ -214,9 +235,24 @@ export default class TaskResetter extends Plugin {
 		if (scope.kind !== "here") return this.reset(file, scope);
 		if (from === undefined || to === undefined) return this.reset(file, { kind: "all" });
 		const lines = (await this.app.vault.cachedRead(file)).split("\n");
-		let at = from;
-		for (let i = from; i <= to && i < lines.length; i++) if (/\[reset-tasks/i.test(lines[i])) { at = i; break; }
-		return this.reset(file, scope, at);
+		return this.reset(file, scope, markerLine(lines, from, to));
+	}
+
+	/** Reading view's buttons, to dim and undim as their notes change. */
+	reading = new Set<{ button: HTMLElement; file: TFile; scope: Scope; section: () => { lineStart: number; lineEnd: number } | null }>();
+
+	/** Dim a reading-view button if it has nothing to reset. */
+	async dimReading(entry: { button: HTMLElement; file: TFile; scope: Scope; section: () => { lineStart: number; lineEnd: number } | null }): Promise<void> {
+		const lines = (await this.app.vault.cachedRead(entry.file)).split("\n");
+		const info = entry.section();
+		const at = entry.scope.kind === "here" ? (info ? markerLine(lines, info.lineStart, info.lineEnd) : undefined) : undefined;
+		const scope = entry.scope.kind === "here" && at === undefined ? { kind: "all" } as Scope : entry.scope;
+		entry.button.toggleClass("is-empty", this.isEmpty(lines, scope, at));
+	}
+
+	/** Whether a button would find nothing to reset (and the setting to dim it is on). */
+	isEmpty(lines: string[], scope: Scope, at?: number): boolean {
+		return this.settings.dimWhenEmpty && !(this.targets(lines, scope, at)?.length);
 	}
 
 	/** The box's mark, if this line is a task that should be cleared. */
@@ -356,6 +392,12 @@ export default class TaskResetter extends Plugin {
 	}
 
 	/** Icon-only buttons: a class on the page, so buttons already on screen change at once. */
+	/** Redraw the buttons after a setting that changes how they look. */
+	redrawButtons(): void {
+		this.app.workspace.updateOptions();
+		for (const entry of this.reading) void this.dimReading(entry);
+	}
+
 	applyLabel(): void {
 		document.body.toggleClass("task-resetter-icon-only", this.settings.hideLabel);
 	}
@@ -395,6 +437,14 @@ class TaskResetterSettings extends PluginSettingTab {
 				this.plugin.applyLabel();
 				await this.plugin.saveSettings();
 			}));
+		new Setting(containerEl)
+			.setName("Dim when there's nothing to reset")
+			.setDesc("Fade a button when none of the tasks it covers are checked.")
+			.addToggle((t) => t.setValue(this.plugin.settings.dimWhenEmpty).onChange(async (v) => {
+				this.plugin.settings.dimWhenEmpty = v;
+				await this.plugin.saveSettings();
+				this.plugin.redrawButtons();
+			}));
 		new Setting(containerEl).setName("Button in a note").setHeading();
 		new Setting(containerEl).setDesc(createFragment((f) => {
 			f.appendText("Type ");
@@ -412,19 +462,21 @@ class TaskResetterSettings extends PluginSettingTab {
 
 /** The [reset-tasks] marker drawn as a button in the editor. */
 class MarkerWidget extends WidgetType {
-	constructor(private plugin: TaskResetter, private marker: Marker, private line: number, private length: number) {
+	constructor(private plugin: TaskResetter, private marker: Marker, private line: number, private length: number, private empty: boolean) {
 		super();
 	}
 
 	eq(other: MarkerWidget): boolean {
-		return JSON.stringify(other.marker) === JSON.stringify(this.marker) && other.line === this.line && other.length === this.length;
+		return JSON.stringify(other.marker) === JSON.stringify(this.marker) && other.line === this.line && other.length === this.length && other.empty === this.empty;
 	}
 
 	toDOM(view: EditorView): HTMLElement {
-		return this.plugin.button(this.marker, () => {
+		const button = this.plugin.button(this.marker, () => {
 			const file = view.state.field(editorInfoField)?.file;
 			if (file) void this.plugin.reset(file, this.marker.scope, this.line);
 		});
+		button.toggleClass("is-empty", this.empty);
+		return button;
 	}
 }
 
@@ -438,6 +490,9 @@ function markerButtons(plugin: TaskResetter) {
 		if (!view.state.field(editorLivePreviewField)) return builder.finish();
 		const doc = view.state.doc;
 		const sel = view.state.selection.ranges;
+		// The note's lines, split once and only if there's a button (to see whether it has anything to reset).
+		let split: string[] | null = null;
+		const lines = () => (split ??= doc.toString().split("\n"));
 		// Which lines are inside fenced code (markers there stay text).
 		let fence = false;
 		const fenced = new Set<number>();
@@ -459,7 +514,7 @@ function markerButtons(plugin: TaskResetter) {
 					if (((line.text.slice(0, m.index).match(/`/g) ?? []).length % 2) === 1) continue;
 					// The cursor (or a selection) on its line shows it as text, as Obsidian does with other markup.
 					if (sel.some((r) => r.from <= line.to && r.to >= line.from)) continue;
-					builder.add(start, end, Decoration.replace({ widget: new MarkerWidget(plugin, marker, n - 1, m[0].length) }));
+					builder.add(start, end, Decoration.replace({ widget: new MarkerWidget(plugin, marker, n - 1, m[0].length, plugin.isEmpty(lines(), marker.scope, n - 1)) }));
 				}
 			}
 		}
