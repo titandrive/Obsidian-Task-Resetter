@@ -23,6 +23,65 @@ Uncheck the tasks in a note, so a checklist can be used again.
 
   For example: `[reset-tasks heading: Evening icon: moon label: Evening chores]` or `[reset-tasks ## icon: list-checks]`.
 
+## Examples
+
+| You type | The button | What it resets |
+|---|---|---|
+| `[reset-tasks]` | Reset tasks | The section it's on or under; the whole note when it's above any heading |
+| `## Morning [reset-tasks]` | Reset tasks | The Morning section, subheadings included |
+| `[reset-tasks all]` | Reset all tasks | The whole note |
+| `[reset-tasks ##]` | Reset H2 tasks | Every H2 section, subheadings included |
+| `[reset-tasks ###]` | Reset H3 tasks | Every H3 section |
+| `[reset-tasks heading: Morning]` | Reset Morning | Every heading named Morning, wherever the button is |
+| `[reset-tasks: Morning]` | Reset Morning | The same, written short |
+| `[reset-tasks icon: sunrise]` | Reset tasks, with a sunrise icon | Its own section |
+| `[reset-tasks label: Reset me]` | Reset me | Its own section |
+| `[reset-tasks all icon: list-restart label: Start over]` | Start over, with a list-restart icon | The whole note |
+| `[reset-tasks ## icon: list-checks]` | Reset H2 tasks, with a list-checks icon | Every H2 section |
+
+With every option at once:
+
+```
+[reset-tasks heading: Evening icon: moon label: Evening chores]
+```
+
+A button reading **Evening chores** with a moon icon, which resets every heading named Evening, wherever it sits in the note. The options can go in any order.
+
+A whole note:
+
+```markdown
+Every H2 section: [reset-tasks ##]
+Start the week over: [reset-tasks all icon: list-restart label: Start over]
+
+# Weekdays [reset-tasks icon: briefcase label: Reset the week]
+
+## Morning [reset-tasks icon: sunrise]
+
+- [x] Make coffee
+- [x] Feed the cat
+
+### Extras
+
+- [x] Stretch
+
+## Evening [reset-tasks heading: Evening icon: moon label: Evening chores]
+
+- [x] Dishes
+- [x] Set an alarm
+
+# Weekend
+
+## Morning
+
+- [x] Long walk
+
+## Errands [reset-tasks: Errands]
+
+- [x] Groceries
+```
+
+Here **Reset the week** clears all of Weekdays, the sunrise button clears Morning and its Extras, **Evening chores** clears Evening, **Reset H2 tasks** clears every H2 section in both weeks, and **Start over** clears everything.
+
 ## Details
 
 - Unchecks `[x]` and `[X]`, including nested and numbered tasks. Tasks inside code blocks are left alone.
