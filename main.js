@@ -60,20 +60,24 @@ var TaskResetter = class extends import_obsidian.Plugin {
       }
       void this.reset(file);
     });
-    this.registerMarkdownCodeBlockProcessor("reset-tasks", (source, el, ctx) => {
-      const whole = source.trim().toLowerCase() === "all";
-      const button = el.createEl("button", { cls: "reset-tasks-button" });
-      (0, import_obsidian.setIcon)(button.createSpan({ cls: "reset-tasks-icon" }), "list-restart");
-      button.createSpan({ text: whole ? "Reset all tasks" : "Reset tasks" });
-      button.addEventListener("mousedown", (e) => e.stopPropagation());
-      button.onclick = () => {
-        const file = this.app.vault.getAbstractFileByPath(ctx.sourcePath);
-        if (!(file instanceof import_obsidian.TFile))
-          return;
-        const info = ctx.getSectionInfo(el);
-        void this.reset(file, whole || !info ? void 0 : info.lineEnd + 1);
-      };
-    });
+    try {
+      this.registerMarkdownCodeBlockProcessor("reset-tasks", (source, el, ctx) => {
+        const whole = source.trim().toLowerCase() === "all";
+        const button = el.createEl("button", { cls: "reset-tasks-button" });
+        (0, import_obsidian.setIcon)(button.createSpan({ cls: "reset-tasks-icon" }), "list-restart");
+        button.createSpan({ text: whole ? "Reset all tasks" : "Reset tasks" });
+        button.addEventListener("mousedown", (e) => e.stopPropagation());
+        button.onclick = () => {
+          const file = this.app.vault.getAbstractFileByPath(ctx.sourcePath);
+          if (!(file instanceof import_obsidian.TFile))
+            return;
+          const info = ctx.getSectionInfo(el);
+          void this.reset(file, whole || !info ? void 0 : info.lineEnd + 1);
+        };
+      });
+    } catch (e) {
+      console.warn("Task Resetter: the reset-tasks button is taken by another plugin.", e);
+    }
   }
   /** The box's mark, if this line is a task that should be cleared. */
   clears(line) {

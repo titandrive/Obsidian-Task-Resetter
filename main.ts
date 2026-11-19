@@ -49,21 +49,26 @@ export default class TaskResetter extends Plugin {
 		});
 
 		// ```reset-tasks``` in a note: a button that resets the list under it (or the whole note with "all").
-		this.registerMarkdownCodeBlockProcessor("reset-tasks", (source, el, ctx) => {
-			const whole = source.trim().toLowerCase() === "all";
-			const button = el.createEl("button", { cls: "reset-tasks-button" });
-			setIcon(button.createSpan({ cls: "reset-tasks-icon" }), "list-restart");
-			button.createSpan({ text: whole ? "Reset all tasks" : "Reset tasks" });
-			// Keep the click from moving the editor's cursor into the code block.
-			button.addEventListener("mousedown", (e) => e.stopPropagation());
-			button.onclick = () => {
-				const file = this.app.vault.getAbstractFileByPath(ctx.sourcePath);
-				if (!(file instanceof TFile)) return;
-				// Where the block is now (the note may have changed since it was drawn).
-				const info = ctx.getSectionInfo(el);
-				void this.reset(file, whole || !info ? undefined : info.lineEnd + 1);
-			};
-		});
+		// If another plugin already owns that block name, the command and sidebar button still work.
+		try {
+			this.registerMarkdownCodeBlockProcessor("reset-tasks", (source, el, ctx) => {
+				const whole = source.trim().toLowerCase() === "all";
+				const button = el.createEl("button", { cls: "reset-tasks-button" });
+				setIcon(button.createSpan({ cls: "reset-tasks-icon" }), "list-restart");
+				button.createSpan({ text: whole ? "Reset all tasks" : "Reset tasks" });
+				// Keep the click from moving the editor's cursor into the code block.
+				button.addEventListener("mousedown", (e) => e.stopPropagation());
+				button.onclick = () => {
+					const file = this.app.vault.getAbstractFileByPath(ctx.sourcePath);
+					if (!(file instanceof TFile)) return;
+					// Where the block is now (the note may have changed since it was drawn).
+					const info = ctx.getSectionInfo(el);
+					void this.reset(file, whole || !info ? undefined : info.lineEnd + 1);
+				};
+			});
+		} catch (e) {
+			console.warn("Task Resetter: the reset-tasks button is taken by another plugin.", e);
+		}
 	}
 
 	/** The box's mark, if this line is a task that should be cleared. */
