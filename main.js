@@ -323,20 +323,12 @@ var MarkerWidget = class extends import_view.WidgetType {
     return other.whole === this.whole && other.line === this.line && other.length === this.length;
   }
   toDOM(view) {
-    const button = this.plugin.button(this.whole, () => {
+    return this.plugin.button(this.whole, () => {
       var _a;
       const file = (_a = view.state.field(import_obsidian.editorInfoField)) == null ? void 0 : _a.file;
       if (file)
         void this.plugin.reset(file, this.whole ? void 0 : this.line);
     });
-    button.addEventListener("contextmenu", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const from = view.posAtDOM(button);
-      view.dispatch({ selection: { anchor: from + this.length } });
-      view.focus();
-    });
-    return button;
   }
 };
 function markerButtons(plugin) {

@@ -312,20 +312,10 @@ class MarkerWidget extends WidgetType {
 	}
 
 	toDOM(view: EditorView): HTMLElement {
-		const button = this.plugin.button(this.whole, () => {
+		return this.plugin.button(this.whole, () => {
 			const file = view.state.field(editorInfoField)?.file;
 			if (file) void this.plugin.reset(file, this.whole ? undefined : this.line);
 		});
-		// Long-press (phones) or right-click: show it as text again, with the cursor just after it, so
-		// it can be edited or deleted (a tap or click presses the button, so the cursor can't get there).
-		button.addEventListener("contextmenu", (e) => {
-			e.preventDefault();
-			e.stopPropagation();
-			const from = view.posAtDOM(button);
-			view.dispatch({ selection: { anchor: from + this.length } });
-			view.focus();
-		});
-		return button;
 	}
 }
 
