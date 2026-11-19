@@ -28,8 +28,11 @@ __export(main_exports, {
 });
 module.exports = __toCommonJS(main_exports);
 var import_obsidian = require("obsidian");
+var import_state = require("@codemirror/state");
+var import_view = require("@codemirror/view");
 var DEFAULTS = { clearOtherMarkers: false };
 var TASK = /^(\s*(?:[-*+]|\d+[.)])\s+\[)([^\]])(\])/;
+var MARKER = /\[reset-tasks( all)?\]/gi;
 var HEADING = /^(#{1,6})\s/;
 var TaskResetter = class extends import_obsidian.Plugin {
   constructor() {
@@ -67,6 +70,35 @@ var TaskResetter = class extends import_obsidian.Plugin {
         editor.setCursor({ line: at + 2, ch: 0 });
       }
     });
+    this.registerEditorExtension(markerButtons(this));
+    this.registerMarkdownPostProcessor((el, ctx) => {
+      var _a2, _b, _c, _d;
+      const file = this.app.vault.getAbstractFileByPath(ctx.sourcePath);
+      if (!(file instanceof import_obsidian.TFile))
+        return;
+      const walker = el.doc.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      const nodes = [];
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        if (/\[reset-tasks/i.test((_a2 = n.textContent) != null ? _a2 : "") && !((_b = n.parentElement) == null ? void 0 : _b.closest("code, pre")))
+          nodes.push(n);
+      }
+      for (const node of nodes) {
+        const text = (_c = node.textContent) != null ? _c : "";
+        const frag = el.doc.createDocumentFragment();
+        let last = 0;
+        for (const m of text.matchAll(MARKER)) {
+          frag.append(text.slice(last, m.index));
+          const whole = !!m[1];
+          frag.append(this.button(whole, () => {
+            const info = ctx.getSectionInfo(el);
+            void this.resetAtMarker(file, whole, info ? info.lineStart : void 0, info ? info.lineEnd : void 0);
+          }));
+          last = ((_d = m.index) != null ? _d : 0) + m[0].length;
+        }
+        frag.append(text.slice(last));
+        node.replaceWith(frag);
+      }
+    });
     this.addRibbonIcon("list-restart", "Reset tasks in this note", () => {
       const file = this.app.workspace.getActiveFile();
       if (!file || file.extension !== "md") {
@@ -78,21 +110,46 @@ var TaskResetter = class extends import_obsidian.Plugin {
     try {
       this.registerMarkdownCodeBlockProcessor("reset-tasks", (source, el, ctx) => {
         const whole = source.trim().toLowerCase() === "all";
-        const button = el.createEl("button", { cls: "reset-tasks-button" });
-        (0, import_obsidian.setIcon)(button.createSpan({ cls: "reset-tasks-icon" }), "list-restart");
-        button.createSpan({ text: whole ? "Reset all tasks" : "Reset tasks" });
-        button.addEventListener("mousedown", (e) => e.stopPropagation());
-        button.onclick = () => {
+        el.append(this.button(whole, () => {
           const file = this.app.vault.getAbstractFileByPath(ctx.sourcePath);
           if (!(file instanceof import_obsidian.TFile))
             return;
           const info = ctx.getSectionInfo(el);
           void this.reset(file, whole || !info ? void 0 : info.lineEnd);
-        };
+        }));
       });
     } catch (e) {
       console.warn("Task Resetter: the reset-tasks button is taken by another plugin.", e);
     }
+  }
+  /** The Reset button (the block's, and the [reset-tasks] marker's). */
+  button(whole, onClick) {
+    const button = createEl("button", { cls: "reset-tasks-button" });
+    (0, import_obsidian.setIcon)(button.createSpan({ cls: "reset-tasks-icon" }), "list-restart");
+    button.createSpan({ text: whole ? "Reset all tasks" : "Reset tasks" });
+    button.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    button.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      onClick();
+    });
+    return button;
+  }
+  /** Reading view: find the marker's line within its section (the first line there that has one). */
+  async resetAtMarker(file, whole, from, to) {
+    if (whole || from === void 0 || to === void 0)
+      return this.reset(file);
+    const lines = (await this.app.vault.cachedRead(file)).split("\n");
+    let at = from;
+    for (let i = from; i <= to && i < lines.length; i++)
+      if (/\[reset-tasks/i.test(lines[i])) {
+        at = i;
+        break;
+      }
+    return this.reset(file, at);
   }
   /** The box's mark, if this line is a task that should be cleared. */
   clears(line) {
@@ -102,7 +159,8 @@ var TaskResetter = class extends import_obsidian.Plugin {
     return this.settings.clearOtherMarkers || m[2] === "x" || m[2] === "X";
   }
   /**
-   * Lines to clear. Without `blockEnd`, the whole note. With it (the last line of a button's block):
+   * Lines to clear. Without `blockEnd`, the whole note. With it (the last line of a button's block, or
+   * the line a [reset-tasks] marker is on):
    * the section of the heading the button sits under, from the button down to the next heading of the
    * same or a higher level, subheadings included; or the whole note if no heading is above it. Fenced
    * code is skipped, so task-like lines in code examples are left alone.
@@ -233,7 +291,74 @@ var TaskResetterSettings = class extends import_obsidian.PluginSettingTab {
     new import_obsidian.Setting(containerEl).setDesc(createFragment((f) => {
       f.appendText("Add a code block named reset-tasks anywhere in a note. Under a heading, its button unchecks that heading's section (subheadings included). Above any heading, or with ");
       f.createEl("code", { text: "all" });
-      f.appendText(" written inside it, it unchecks the whole note.");
+      f.appendText(" written inside it, it unchecks the whole note. You can also type ");
+      f.createEl("code", { text: "[reset-tasks]" });
+      f.appendText(" anywhere, even at the end of a heading, for the same button.");
     }));
   }
 };
+var MarkerWidget = class extends import_view.WidgetType {
+  constructor(plugin, whole, line) {
+    super();
+    this.plugin = plugin;
+    this.whole = whole;
+    this.line = line;
+  }
+  eq(other) {
+    return other.whole === this.whole && other.line === this.line;
+  }
+  toDOM(view) {
+    return this.plugin.button(this.whole, () => {
+      var _a;
+      const file = (_a = view.state.field(import_obsidian.editorInfoField)) == null ? void 0 : _a.file;
+      if (file)
+        void this.plugin.reset(file, this.whole ? void 0 : this.line);
+    });
+  }
+};
+function markerButtons(plugin) {
+  const build = (view) => {
+    var _a, _b;
+    const builder = new import_state.RangeSetBuilder();
+    if (!view.state.field(import_obsidian.editorLivePreviewField))
+      return builder.finish();
+    const doc = view.state.doc;
+    const sel = view.state.selection.ranges;
+    let fence = false;
+    const fenced = /* @__PURE__ */ new Set();
+    for (let n = 1; n <= doc.lines; n++) {
+      const text = doc.line(n).text;
+      const marker = /^\s*(```|~~~)/.test(text);
+      if (marker)
+        fence = !fence;
+      if (fence || marker)
+        fenced.add(n);
+    }
+    for (const { from, to } of view.visibleRanges) {
+      for (let n = doc.lineAt(from).number; n <= doc.lineAt(to).number; n++) {
+        if (fenced.has(n))
+          continue;
+        const line = doc.line(n);
+        for (const m of line.text.matchAll(MARKER)) {
+          const start = line.from + ((_a = m.index) != null ? _a : 0), end = start + m[0].length;
+          if (((_b = line.text.slice(0, m.index).match(/`/g)) != null ? _b : []).length % 2 === 1)
+            continue;
+          if (sel.some((r) => r.from <= end && r.to >= start))
+            continue;
+          builder.add(start, end, import_view.Decoration.replace({ widget: new MarkerWidget(plugin, !!m[1], n - 1) }));
+        }
+      }
+    }
+    return builder.finish();
+  };
+  return import_view.ViewPlugin.fromClass(class {
+    constructor(view) {
+      this.decorations = build(view);
+    }
+    update(u) {
+      if (u.docChanged || u.selectionSet || u.viewportChanged || u.startState.field(import_obsidian.editorLivePreviewField) !== u.state.field(import_obsidian.editorLivePreviewField)) {
+        this.decorations = build(u.view);
+      }
+    }
+  }, { decorations: (v) => v.decorations });
+}

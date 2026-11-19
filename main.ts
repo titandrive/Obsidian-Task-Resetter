@@ -1,4 +1,6 @@
-import { App, Editor, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, setIcon, TFile } from "obsidian";
+import { App, Editor, editorInfoField, editorLivePreviewField, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, setIcon, TFile } from "obsidian";
+import { RangeSetBuilder } from "@codemirror/state";
+import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate, WidgetType } from "@codemirror/view";
 
 /*
  * Task Resetter: uncheck the tasks in a note, so a checklist can be used again.
@@ -7,6 +9,8 @@ import { App, Editor, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, s
  * - A reset-tasks code block puts a button in the note. Under a heading, it resets that heading's
  *   section (subheadings included, up to the next heading of the same or a higher level). Above any
  *   heading, or with `all` written inside it, it resets the whole note.
+ * - Or type [reset-tasks] anywhere, even at the end of a heading: it shows as the same button
+ *   ([reset-tasks all] for the whole note). Its line decides what it resets, like the block's.
  *
  * When the note is open in the editor, the reset is one edit, so Ctrl/Cmd+Z puts every check back
  * (focus goes back to the text afterwards, so it works straight away). The notice also has an Undo.
@@ -21,6 +25,9 @@ const DEFAULTS: Settings = { clearOtherMarkers: false };
 
 /** A task line: indentation, a list marker, then [ ] with something in the box. */
 const TASK = /^(\s*(?:[-*+]|\d+[.)])\s+\[)([^\]])(\])/;
+
+/** The short form: [reset-tasks] or [reset-tasks all], typed anywhere in a line. */
+const MARKER = /\[reset-tasks( all)?\]/gi;
 
 /** A Markdown heading line (outside code blocks; callers skip fenced code). */
 const HEADING = /^(#{1,6})\s/;
@@ -62,6 +69,36 @@ export default class TaskResetter extends Plugin {
 			},
 		});
 
+		// [reset-tasks] typed in a note: a button in editing view (shown as text while the cursor is on
+		// it, so it can be edited) and in reading view.
+		this.registerEditorExtension(markerButtons(this));
+		this.registerMarkdownPostProcessor((el, ctx) => {
+			const file = this.app.vault.getAbstractFileByPath(ctx.sourcePath);
+			if (!(file instanceof TFile)) return;
+			const walker = el.doc.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+			const nodes: Text[] = [];
+			for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+				if (/\[reset-tasks/i.test(n.textContent ?? "") && !(n.parentElement?.closest("code, pre"))) nodes.push(n as Text);
+			}
+			for (const node of nodes) {
+				const text = node.textContent ?? "";
+				const frag = el.doc.createDocumentFragment();
+				let last = 0;
+				for (const m of text.matchAll(MARKER)) {
+					frag.append(text.slice(last, m.index));
+					const whole = !!m[1];
+					frag.append(this.button(whole, () => {
+						// Which line: the section this element came from, at the marker's line in it.
+						const info = ctx.getSectionInfo(el);
+						void this.resetAtMarker(file, whole, info ? info.lineStart : undefined, info ? info.lineEnd : undefined);
+					}));
+					last = (m.index ?? 0) + m[0].length;
+				}
+				frag.append(text.slice(last));
+				node.replaceWith(frag);
+			}
+		});
+
 		this.addRibbonIcon("list-restart", "Reset tasks in this note", () => {
 			const file = this.app.workspace.getActiveFile();
 			if (!file || file.extension !== "md") { new Notice("Open a note to reset its tasks."); return; }
@@ -73,22 +110,37 @@ export default class TaskResetter extends Plugin {
 		try {
 			this.registerMarkdownCodeBlockProcessor("reset-tasks", (source, el, ctx) => {
 				const whole = source.trim().toLowerCase() === "all";
-				const button = el.createEl("button", { cls: "reset-tasks-button" });
-				setIcon(button.createSpan({ cls: "reset-tasks-icon" }), "list-restart");
-				button.createSpan({ text: whole ? "Reset all tasks" : "Reset tasks" });
-				// Keep the click from moving the editor's cursor into the code block.
-				button.addEventListener("mousedown", (e) => e.stopPropagation());
-				button.onclick = () => {
+				el.append(this.button(whole, () => {
 					const file = this.app.vault.getAbstractFileByPath(ctx.sourcePath);
 					if (!(file instanceof TFile)) return;
 					// Where the block is now (the note may have changed since it was drawn).
 					const info = ctx.getSectionInfo(el);
 					void this.reset(file, whole || !info ? undefined : info.lineEnd);
-				};
+				}));
 			});
 		} catch (e) {
 			console.warn("Task Resetter: the reset-tasks button is taken by another plugin.", e);
 		}
+	}
+
+	/** The Reset button (the block's, and the [reset-tasks] marker's). */
+	button(whole: boolean, onClick: () => void): HTMLElement {
+		const button = createEl("button", { cls: "reset-tasks-button" });
+		setIcon(button.createSpan({ cls: "reset-tasks-icon" }), "list-restart");
+		button.createSpan({ text: whole ? "Reset all tasks" : "Reset tasks" });
+		// Keep the click from moving the editor's cursor onto the button's text.
+		button.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); });
+		button.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); onClick(); });
+		return button;
+	}
+
+	/** Reading view: find the marker's line within its section (the first line there that has one). */
+	async resetAtMarker(file: TFile, whole: boolean, from?: number, to?: number): Promise<void> {
+		if (whole || from === undefined || to === undefined) return this.reset(file);
+		const lines = (await this.app.vault.cachedRead(file)).split("\n");
+		let at = from;
+		for (let i = from; i <= to && i < lines.length; i++) if (/\[reset-tasks/i.test(lines[i])) { at = i; break; }
+		return this.reset(file, at);
 	}
 
 	/** The box's mark, if this line is a task that should be cleared. */
@@ -99,7 +151,8 @@ export default class TaskResetter extends Plugin {
 	}
 
 	/**
-	 * Lines to clear. Without `blockEnd`, the whole note. With it (the last line of a button's block):
+	 * Lines to clear. Without `blockEnd`, the whole note. With it (the last line of a button's block, or
+	 * the line a [reset-tasks] marker is on):
 	 * the section of the heading the button sits under, from the button down to the next heading of the
 	 * same or a higher level, subheadings included; or the whole note if no heading is above it. Fenced
 	 * code is skipped, so task-like lines in code examples are left alone.
@@ -220,7 +273,72 @@ class TaskResetterSettings extends PluginSettingTab {
 		new Setting(containerEl).setDesc(createFragment((f) => {
 			f.appendText("Add a code block named reset-tasks anywhere in a note. Under a heading, its button unchecks that heading's section (subheadings included). Above any heading, or with ");
 			f.createEl("code", { text: "all" });
-			f.appendText(" written inside it, it unchecks the whole note.");
+			f.appendText(" written inside it, it unchecks the whole note. You can also type ");
+			f.createEl("code", { text: "[reset-tasks]" });
+			f.appendText(" anywhere, even at the end of a heading, for the same button.");
 		}));
 	}
+}
+
+/** The [reset-tasks] marker drawn as a button in the editor. */
+class MarkerWidget extends WidgetType {
+	constructor(private plugin: TaskResetter, private whole: boolean, private line: number) {
+		super();
+	}
+
+	eq(other: MarkerWidget): boolean {
+		return other.whole === this.whole && other.line === this.line;
+	}
+
+	toDOM(view: EditorView): HTMLElement {
+		return this.plugin.button(this.whole, () => {
+			const file = view.state.field(editorInfoField)?.file;
+			if (file) void this.plugin.reset(file, this.whole ? undefined : this.line);
+		});
+	}
+}
+
+/**
+ * Editing view (Live Preview): each [reset-tasks] marker shows as a button, except while the cursor or
+ * a selection touches it (then it's plain text you can edit), and not inside code.
+ */
+function markerButtons(plugin: TaskResetter) {
+	const build = (view: EditorView): DecorationSet => {
+		const builder = new RangeSetBuilder<Decoration>();
+		if (!view.state.field(editorLivePreviewField)) return builder.finish();
+		const doc = view.state.doc;
+		const sel = view.state.selection.ranges;
+		// Which lines are inside fenced code (markers there stay text).
+		let fence = false;
+		const fenced = new Set<number>();
+		for (let n = 1; n <= doc.lines; n++) {
+			const text = doc.line(n).text;
+			const marker = /^\s*(```|~~~)/.test(text);
+			if (marker) fence = !fence;
+			if (fence || marker) fenced.add(n);
+		}
+		for (const { from, to } of view.visibleRanges) {
+			for (let n = doc.lineAt(from).number; n <= doc.lineAt(to).number; n++) {
+				if (fenced.has(n)) continue;
+				const line = doc.line(n);
+				for (const m of line.text.matchAll(MARKER)) {
+					const start = line.from + (m.index ?? 0), end = start + m[0].length;
+					// Inside `inline code` (an odd number of backticks before it): leave it.
+					if (((line.text.slice(0, m.index).match(/`/g) ?? []).length % 2) === 1) continue;
+					if (sel.some((r) => r.from <= end && r.to >= start)) continue;
+					builder.add(start, end, Decoration.replace({ widget: new MarkerWidget(plugin, !!m[1], n - 1) }));
+				}
+			}
+		}
+		return builder.finish();
+	};
+	return ViewPlugin.fromClass(class {
+		decorations: DecorationSet;
+		constructor(view: EditorView) { this.decorations = build(view); }
+		update(u: ViewUpdate) {
+			if (u.docChanged || u.selectionSet || u.viewportChanged || u.startState.field(editorLivePreviewField) !== u.state.field(editorLivePreviewField)) {
+				this.decorations = build(u.view);
+			}
+		}
+	}, { decorations: (v) => v.decorations });
 }
