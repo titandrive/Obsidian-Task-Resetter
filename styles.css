@@ -1,8 +1,28 @@
-/* The in-note Reset button: small and quiet, like a toolbar button. */
+/*
+ * The Reset button in notes: an outlined button with the accent-colored icon, the same size wherever
+ * it is (in a heading it keeps the interface font size instead of growing with the heading).
+ */
 .block-language-reset-tasks { margin: var(--size-2-2) 0; }
-button.reset-tasks-button { display: inline-flex; align-items: center; gap: .4em; height: auto; padding: .3em .75em; font-size: var(--font-ui-small); border-radius: var(--radius-s); cursor: pointer; }
-.reset-tasks-icon { display: flex; }
-.reset-tasks-icon svg { width: 14px; height: 14px; }
-/* Icon-only buttons (setting): just the small square. */
+button.reset-tasks-button {
+	display: inline-flex; align-items: center; justify-content: center; gap: .45em;
+	height: 2em; padding: 0 .8em; vertical-align: middle;
+	font-family: var(--font-interface); font-size: var(--font-ui-small); font-weight: var(--font-normal); line-height: 1;
+	color: var(--text-muted); background: transparent; box-shadow: none;
+	border: 1px solid var(--background-modifier-border); border-radius: var(--radius-m); cursor: pointer;
+}
+button.reset-tasks-button:hover { color: var(--text-normal); background: var(--background-modifier-hover); border-color: var(--background-modifier-border-hover); }
+button.reset-tasks-button:active { background: var(--background-modifier-active-hover); }
+.reset-tasks-icon { display: flex; color: var(--interactive-accent); }
+.reset-tasks-icon svg { width: 16px; height: 16px; }
+/* Next to heading text, a little space before it. */
+:is(h1, h2, h3, h4, h5, h6, .HyperMD-header) button.reset-tasks-button { margin-inline-start: .5em; }
+
+/* Icon only (setting): a square button with a bigger icon. */
 .task-resetter-icon-only .reset-tasks-label { display: none; }
-.task-resetter-icon-only button.reset-tasks-button { padding: .3em .4em; }
+.task-resetter-icon-only button.reset-tasks-button { width: 2em; padding: 0; }
+.task-resetter-icon-only .reset-tasks-icon svg { width: 18px; height: 18px; }
+
+/* Phones: a bigger target for a finger. */
+.is-mobile button.reset-tasks-button { height: 2.4em; }
+.is-mobile.task-resetter-icon-only button.reset-tasks-button { width: 2.4em; }
+.is-mobile.task-resetter-icon-only .reset-tasks-icon svg { width: 20px; height: 20px; }
