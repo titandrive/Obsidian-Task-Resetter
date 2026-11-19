@@ -48,17 +48,17 @@ export default class TaskResetter extends Plugin {
 			id: "insert-button",
 			name: "Insert reset button",
 			editorCallback: (editor) => {
+				// On an empty line the button goes right there; on a line with text, on a new line under it.
 				const cur = editor.getCursor();
-				const line = editor.getLine(cur.line);
-				const block = "```reset-tasks\n```";
-				if (!line.trim()) {
-					editor.replaceRange(block, { line: cur.line, ch: 0 }, { line: cur.line, ch: line.length });
-					editor.setCursor({ line: cur.line + 1, ch: 3 });
-				} else {
-					// The line has text: put the button on a new line under it.
-					editor.replaceRange("\n" + block, { line: cur.line, ch: line.length });
-					editor.setCursor({ line: cur.line + 2, ch: 3 });
+				let at = cur.line;
+				if (editor.getLine(at).trim()) {
+					editor.replaceRange("\n", { line: at, ch: editor.getLine(at).length });
+					at++;
 				}
+				// Keep a line after the block for the cursor, so the block shows as a button straight away.
+				const last = at + 1 >= editor.lineCount();
+				editor.replaceRange("```reset-tasks\n```" + (last ? "\n" : ""), { line: at, ch: 0 }, { line: at, ch: editor.getLine(at).length });
+				editor.setCursor({ line: at + 2, ch: 0 });
 			},
 		});
 
