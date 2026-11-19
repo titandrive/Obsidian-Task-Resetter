@@ -28,7 +28,7 @@ interface Settings {
 const DEFAULTS: Settings = { clearOtherMarkers: false, haptics: true, hideLabel: false };
 
 /** The buttons' icon. */
-const ICON = "square-check-big";
+const ICON = "rotate-ccw-square";
 
 /** A task line: indentation, a list marker, then [ ] with something in the box. */
 const TASK = /^(\s*(?:[-*+]|\d+[.)])\s+\[)([^\]])(\])/;
