@@ -107,8 +107,10 @@ var ResetTasks = class extends import_obsidian.Plugin {
   async reset(file, start) {
     const editor = this.editorFor(file);
     let count = 0;
+    let before = "", after = "";
     if (editor) {
-      const lines = editor.getValue().split("\n");
+      before = editor.getValue();
+      const lines = before.split("\n");
       const hits = this.targets(lines, start);
       count = hits.length;
       if (count) {
@@ -119,18 +121,55 @@ var ResetTasks = class extends import_obsidian.Plugin {
             return { from: { line, ch }, to: { line, ch: ch + 1 }, text: " " };
           })
         });
+        after = editor.getValue();
       }
+      editor.focus();
     } else {
       await this.app.vault.process(file, (text) => {
+        before = text;
         const lines = text.split("\n");
         const hits = this.targets(lines, start);
         count = hits.length;
         for (const line of hits)
           lines[line] = lines[line].replace(TASK, "$1 $3");
-        return lines.join("\n");
+        return after = lines.join("\n");
       });
     }
-    new import_obsidian.Notice(count ? `Unchecked ${count} task${count === 1 ? "" : "s"}.` : "Nothing to uncheck.");
+    if (!count) {
+      new import_obsidian.Notice("Nothing to uncheck.");
+      return;
+    }
+    const notice = new import_obsidian.Notice(createFragment((f) => {
+      f.appendText(`Unchecked ${count} task${count === 1 ? "" : "s"}. `);
+      const undo = f.createEl("a", { text: "Undo", href: "#" });
+      undo.onclick = (e) => {
+        e.preventDefault();
+        notice.hide();
+        void this.undo(file, before, after);
+      };
+    }), 6e3);
+  }
+  /** Put the note back as it was before a reset, unless it has been changed since. */
+  async undo(file, before, after) {
+    const editor = this.editorFor(file);
+    if (editor) {
+      if (editor.getValue() !== after) {
+        new import_obsidian.Notice("The note has changed since; use Ctrl/Cmd+Z instead.");
+        return;
+      }
+      editor.undo();
+      editor.focus();
+      return;
+    }
+    let changed = false;
+    await this.app.vault.process(file, (text) => {
+      if (text !== after) {
+        changed = true;
+        return text;
+      }
+      return before;
+    });
+    new import_obsidian.Notice(changed ? "The note has changed since, so it was left as it is." : "Tasks checked again.");
   }
   /** The editor showing this note, if it's open in editing view in the active pane. */
   editorFor(file) {

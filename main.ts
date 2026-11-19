@@ -7,7 +7,8 @@ import { App, Editor, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, s
  * - A reset-tasks code block puts a button in the note that resets just the list under it, down to
  *   the next heading. Write `all` inside the block to make it reset the whole note instead.
  *
- * When the note is open in the editor, the reset is one edit, so Ctrl/Cmd+Z puts every check back.
+ * When the note is open in the editor, the reset is one edit, so Ctrl/Cmd+Z puts every check back
+ * (focus goes back to the text afterwards, so it works straight away). The notice also has an Undo.
  */
 
 interface Settings {
@@ -92,8 +93,10 @@ export default class ResetTasks extends Plugin {
 	async reset(file: TFile, start?: number): Promise<void> {
 		const editor = this.editorFor(file);
 		let count = 0;
+		let before = "", after = "";
 		if (editor) {
-			const lines = editor.getValue().split("\n");
+			before = editor.getValue();
+			const lines = before.split("\n");
 			const hits = this.targets(lines, start);
 			count = hits.length;
 			if (count) {
@@ -104,17 +107,49 @@ export default class ResetTasks extends Plugin {
 						return { from: { line, ch }, to: { line, ch: ch + 1 }, text: " " };
 					}),
 				});
+				after = editor.getValue();
 			}
+			// A click on the in-note button leaves focus on the button, where Ctrl/Cmd+Z doesn't reach
+			// the editor: put it back in the text so undo works right away.
+			editor.focus();
 		} else {
 			await this.app.vault.process(file, (text) => {
+				before = text;
 				const lines = text.split("\n");
 				const hits = this.targets(lines, start);
 				count = hits.length;
 				for (const line of hits) lines[line] = lines[line].replace(TASK, "$1 $3");
-				return lines.join("\n");
+				return (after = lines.join("\n"));
 			});
 		}
-		new Notice(count ? `Unchecked ${count} task${count === 1 ? "" : "s"}.` : "Nothing to uncheck.");
+		if (!count) { new Notice("Nothing to uncheck."); return; }
+		// The notice has an Undo too (works in reading view, where there's no editor to undo in).
+		const notice = new Notice(createFragment((f) => {
+			f.appendText(`Unchecked ${count} task${count === 1 ? "" : "s"}. `);
+			const undo = f.createEl("a", { text: "Undo", href: "#" });
+			undo.onclick = (e) => {
+				e.preventDefault();
+				notice.hide();
+				void this.undo(file, before, after);
+			};
+		}), 6000);
+	}
+
+	/** Put the note back as it was before a reset, unless it has been changed since. */
+	private async undo(file: TFile, before: string, after: string): Promise<void> {
+		const editor = this.editorFor(file);
+		if (editor) {
+			if (editor.getValue() !== after) { new Notice("The note has changed since; use Ctrl/Cmd+Z instead."); return; }
+			editor.undo();
+			editor.focus();
+			return;
+		}
+		let changed = false;
+		await this.app.vault.process(file, (text) => {
+			if (text !== after) { changed = true; return text; }
+			return before;
+		});
+		new Notice(changed ? "The note has changed since, so it was left as it is." : "Tasks checked again.");
 	}
 
 	/** The editor showing this note, if it's open in editing view in the active pane. */
