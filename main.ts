@@ -1,4 +1,4 @@
-import { App, Editor, editorInfoField, editorLivePreviewField, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, setIcon, TFile } from "obsidian";
+import { App, Editor, editorInfoField, editorLivePreviewField, MarkdownView, Notice, Platform, Plugin, PluginSettingTab, Setting, setIcon, TFile } from "obsidian";
 import { RangeSetBuilder } from "@codemirror/state";
 import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate, WidgetType } from "@codemirror/view";
 
@@ -19,9 +19,11 @@ import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate, WidgetTy
 interface Settings {
 	/** Also clear other task markers ([-], [/], [>]...), not just checked boxes. */
 	clearOtherMarkers: boolean;
+	/** On phones: a light haptic tap when a reset button or the sidebar button is tapped. */
+	haptics: boolean;
 }
 
-const DEFAULTS: Settings = { clearOtherMarkers: false };
+const DEFAULTS: Settings = { clearOtherMarkers: false, haptics: true };
 
 /** A task line: indentation, a list marker, then [ ] with something in the box. */
 const TASK = /^(\s*(?:[-*+]|\d+[.)])\s+\[)([^\]])(\])/;
@@ -100,6 +102,7 @@ export default class TaskResetter extends Plugin {
 		});
 
 		this.addRibbonIcon("list-restart", "Reset tasks in this note", () => {
+			this.tap();
 			const file = this.app.workspace.getActiveFile();
 			if (!file || file.extension !== "md") { new Notice("Open a note to reset its tasks."); return; }
 			void this.reset(file);
@@ -123,6 +126,11 @@ export default class TaskResetter extends Plugin {
 		}
 	}
 
+	/** A short, light tap on phones (Obsidian routes navigator.vibrate to the phone's haptics). */
+	private tap(): void {
+		if (Platform.isMobile && this.settings.haptics) navigator.vibrate?.(20);
+	}
+
 	/** The Reset button (the block's, and the [reset-tasks] marker's). */
 	button(whole: boolean, onClick: () => void): HTMLElement {
 		const button = createEl("button", { cls: "reset-tasks-button" });
@@ -130,7 +138,7 @@ export default class TaskResetter extends Plugin {
 		button.createSpan({ text: whole ? "Reset all tasks" : "Reset tasks" });
 		// Keep the click from moving the editor's cursor onto the button's text.
 		button.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); });
-		button.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); onClick(); });
+		button.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); this.tap(); onClick(); });
 		return button;
 	}
 
@@ -267,6 +275,13 @@ class TaskResetterSettings extends PluginSettingTab {
 			.setDesc("Reset tasks marked with something other than x too, like [-] cancelled or [/] in progress.")
 			.addToggle((t) => t.setValue(this.plugin.settings.clearOtherMarkers).onChange(async (v) => {
 				this.plugin.settings.clearOtherMarkers = v;
+				await this.plugin.saveSettings();
+			}));
+		new Setting(containerEl)
+			.setName("Haptic tap (mobile)")
+			.setDesc("A light tap when you tap a reset button or the sidebar button.")
+			.addToggle((t) => t.setValue(this.plugin.settings.haptics).onChange(async (v) => {
+				this.plugin.settings.haptics = v;
 				await this.plugin.saveSettings();
 			}));
 		new Setting(containerEl).setName("Button in a note").setHeading();

@@ -24,6 +24,7 @@ Uncheck the tasks in a note, so a checklist can be used again.
 ## Details
 
 - Unchecks `[x]` and `[X]`, including nested and numbered tasks. Tasks inside code blocks are left alone.
+- On phones, tapping a reset button gives a light haptic tap (**Haptic tap** in settings turns it off).
 - **Also clear other markers** (in settings, off by default) resets markers like `[-]` and `[/]` too.
 - Undo: when the note is open in the editor, a reset is one edit, so Ctrl/Cmd+Z puts every check back. The notice that says how many were unchecked also has an **Undo** link, which works in reading view too.
 

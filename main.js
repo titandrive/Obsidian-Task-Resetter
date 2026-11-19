@@ -30,7 +30,7 @@ module.exports = __toCommonJS(main_exports);
 var import_obsidian = require("obsidian");
 var import_state = require("@codemirror/state");
 var import_view = require("@codemirror/view");
-var DEFAULTS = { clearOtherMarkers: false };
+var DEFAULTS = { clearOtherMarkers: false, haptics: true };
 var TASK = /^(\s*(?:[-*+]|\d+[.)])\s+\[)([^\]])(\])/;
 var MARKER = /\[reset-tasks( all)?\]/gi;
 var HEADING = /^(#{1,6})\s/;
@@ -100,6 +100,7 @@ var TaskResetter = class extends import_obsidian.Plugin {
       }
     });
     this.addRibbonIcon("list-restart", "Reset tasks in this note", () => {
+      this.tap();
       const file = this.app.workspace.getActiveFile();
       if (!file || file.extension !== "md") {
         new import_obsidian.Notice("Open a note to reset its tasks.");
@@ -122,6 +123,12 @@ var TaskResetter = class extends import_obsidian.Plugin {
       console.warn("Task Resetter: the reset-tasks button is taken by another plugin.", e);
     }
   }
+  /** A short, light tap on phones (Obsidian routes navigator.vibrate to the phone's haptics). */
+  tap() {
+    var _a;
+    if (import_obsidian.Platform.isMobile && this.settings.haptics)
+      (_a = navigator.vibrate) == null ? void 0 : _a.call(navigator, 20);
+  }
   /** The Reset button (the block's, and the [reset-tasks] marker's). */
   button(whole, onClick) {
     const button = createEl("button", { cls: "reset-tasks-button" });
@@ -134,6 +141,7 @@ var TaskResetter = class extends import_obsidian.Plugin {
     button.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
+      this.tap();
       onClick();
     });
     return button;
@@ -285,6 +293,10 @@ var TaskResetterSettings = class extends import_obsidian.PluginSettingTab {
     containerEl.empty();
     new import_obsidian.Setting(containerEl).setName("Also clear other markers").setDesc("Reset tasks marked with something other than x too, like [-] cancelled or [/] in progress.").addToggle((t) => t.setValue(this.plugin.settings.clearOtherMarkers).onChange(async (v) => {
       this.plugin.settings.clearOtherMarkers = v;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian.Setting(containerEl).setName("Haptic tap (mobile)").setDesc("A light tap when you tap a reset button or the sidebar button.").addToggle((t) => t.setValue(this.plugin.settings.haptics).onChange(async (v) => {
+      this.plugin.settings.haptics = v;
       await this.plugin.saveSettings();
     }));
     new import_obsidian.Setting(containerEl).setName("Button in a note").setHeading();
