@@ -60,16 +60,7 @@ var TaskResetter = class extends import_obsidian.Plugin {
     this.addCommand({
       id: "insert-button",
       name: "Insert reset button",
-      editorCallback: (editor) => {
-        const line = editor.getCursor().line;
-        const text = editor.getLine(line);
-        const insert = text.trim() ? (text.endsWith(" ") ? "" : " ") + "[reset-tasks]" : "[reset-tasks]";
-        const ch = text.trim() ? text.length : 0;
-        editor.replaceRange(insert, { line, ch }, { line, ch: text.trim() ? ch : text.length });
-        if (line + 1 >= editor.lineCount())
-          editor.replaceRange("\n", { line, ch: editor.getLine(line).length });
-        editor.setCursor({ line: line + 1, ch: 0 });
-      }
+      editorCallback: (editor) => this.insertButton(editor)
     });
     this.registerEditorExtension(markerButtons(this));
     this.registerMarkdownPostProcessor((el, ctx) => {
@@ -109,6 +100,28 @@ var TaskResetter = class extends import_obsidian.Plugin {
       }
       void this.reset(file);
     });
+    this.addRibbonIcon("square-plus", "Insert reset button", () => {
+      this.tap();
+      const view = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
+      if (!view || view.getMode() !== "source") {
+        new import_obsidian.Notice("Open a note in editing view to add a reset button.");
+        return;
+      }
+      this.insertButton(view.editor);
+      if (!import_obsidian.Platform.isMobile)
+        view.editor.focus();
+    });
+  }
+  /** Put a reset button ([reset-tasks]) at the end of the cursor's line, or on it when it's empty. */
+  insertButton(editor) {
+    const line = editor.getCursor().line;
+    const text = editor.getLine(line);
+    const insert = text.trim() ? (text.endsWith(" ") ? "" : " ") + "[reset-tasks]" : "[reset-tasks]";
+    const ch = text.trim() ? text.length : 0;
+    editor.replaceRange(insert, { line, ch }, { line, ch: text.trim() ? ch : text.length });
+    if (line + 1 >= editor.lineCount())
+      editor.replaceRange("\n", { line, ch: editor.getLine(line).length });
+    editor.setCursor({ line: line + 1, ch: 0 });
   }
   /** A short, light tap on phones (Obsidian routes navigator.vibrate to the phone's haptics). */
   tap() {

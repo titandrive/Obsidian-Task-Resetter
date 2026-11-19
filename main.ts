@@ -62,16 +62,7 @@ export default class TaskResetter extends Plugin {
 		this.addCommand({
 			id: "insert-button",
 			name: "Insert reset button",
-			editorCallback: (editor) => {
-				const line = editor.getCursor().line;
-				const text = editor.getLine(line);
-				const insert = text.trim() ? (text.endsWith(" ") ? "" : " ") + "[reset-tasks]" : "[reset-tasks]";
-				const ch = text.trim() ? text.length : 0;
-				editor.replaceRange(insert, { line, ch }, { line, ch: text.trim() ? ch : text.length });
-				// The cursor moves off the line, so the marker shows as a button straight away.
-				if (line + 1 >= editor.lineCount()) editor.replaceRange("\n", { line, ch: editor.getLine(line).length });
-				editor.setCursor({ line: line + 1, ch: 0 });
-			},
+			editorCallback: (editor) => this.insertButton(editor),
 		});
 
 		// [reset-tasks] typed in a note: a button in editing view (shown as text while the cursor is on
@@ -110,6 +101,25 @@ export default class TaskResetter extends Plugin {
 			if (!file || file.extension !== "md") { new Notice("Open a note to reset its tasks."); return; }
 			void this.reset(file);
 		});
+		this.addRibbonIcon("square-plus", "Insert reset button", () => {
+			this.tap();
+			const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+			if (!view || view.getMode() !== "source") { new Notice("Open a note in editing view to add a reset button."); return; }
+			this.insertButton(view.editor);
+			if (!Platform.isMobile) view.editor.focus();
+		});
+	}
+
+	/** Put a reset button ([reset-tasks]) at the end of the cursor's line, or on it when it's empty. */
+	insertButton(editor: Editor): void {
+		const line = editor.getCursor().line;
+		const text = editor.getLine(line);
+		const insert = text.trim() ? (text.endsWith(" ") ? "" : " ") + "[reset-tasks]" : "[reset-tasks]";
+		const ch = text.trim() ? text.length : 0;
+		editor.replaceRange(insert, { line, ch }, { line, ch: text.trim() ? ch : text.length });
+		// The cursor moves off the line, so the marker shows as a button straight away.
+		if (line + 1 >= editor.lineCount()) editor.replaceRange("\n", { line, ch: editor.getLine(line).length });
+		editor.setCursor({ line: line + 1, ch: 0 });
 	}
 
 	/** A short, light tap on phones (Obsidian routes navigator.vibrate to the phone's haptics). */
