@@ -303,25 +303,35 @@ class TaskResetterSettings extends PluginSettingTab {
 
 /** The [reset-tasks] marker drawn as a button in the editor. */
 class MarkerWidget extends WidgetType {
-	constructor(private plugin: TaskResetter, private whole: boolean, private line: number) {
+	constructor(private plugin: TaskResetter, private whole: boolean, private line: number, private length: number) {
 		super();
 	}
 
 	eq(other: MarkerWidget): boolean {
-		return other.whole === this.whole && other.line === this.line;
+		return other.whole === this.whole && other.line === this.line && other.length === this.length;
 	}
 
 	toDOM(view: EditorView): HTMLElement {
-		return this.plugin.button(this.whole, () => {
+		const button = this.plugin.button(this.whole, () => {
 			const file = view.state.field(editorInfoField)?.file;
 			if (file) void this.plugin.reset(file, this.whole ? undefined : this.line);
 		});
+		// Long-press (phones) or right-click: show it as text again, with the cursor just after it, so
+		// it can be edited or deleted (a tap or click presses the button, so the cursor can't get there).
+		button.addEventListener("contextmenu", (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			const from = view.posAtDOM(button);
+			view.dispatch({ selection: { anchor: from + this.length } });
+			view.focus();
+		});
+		return button;
 	}
 }
 
 /**
  * Editing view (Live Preview): each [reset-tasks] marker shows as a button, except while the cursor or
- * a selection touches it (then it's plain text you can edit), and not inside code.
+ * a selection is on its line (then it's plain text you can edit), and not inside code.
  */
 function markerButtons(plugin: TaskResetter) {
 	const build = (view: EditorView): DecorationSet => {
@@ -346,8 +356,9 @@ function markerButtons(plugin: TaskResetter) {
 					const start = line.from + (m.index ?? 0), end = start + m[0].length;
 					// Inside `inline code` (an odd number of backticks before it): leave it.
 					if (((line.text.slice(0, m.index).match(/`/g) ?? []).length % 2) === 1) continue;
-					if (sel.some((r) => r.from <= end && r.to >= start)) continue;
-					builder.add(start, end, Decoration.replace({ widget: new MarkerWidget(plugin, !!m[1], n - 1) }));
+					// The cursor (or a selection) on its line shows it as text, as Obsidian does with other markup.
+					if (sel.some((r) => r.from <= line.to && r.to >= line.from)) continue;
+					builder.add(start, end, Decoration.replace({ widget: new MarkerWidget(plugin, !!m[1], n - 1, m[0].length) }));
 				}
 			}
 		}

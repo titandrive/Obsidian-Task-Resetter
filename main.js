@@ -312,22 +312,31 @@ var TaskResetterSettings = class extends import_obsidian.PluginSettingTab {
   }
 };
 var MarkerWidget = class extends import_view.WidgetType {
-  constructor(plugin, whole, line) {
+  constructor(plugin, whole, line, length) {
     super();
     this.plugin = plugin;
     this.whole = whole;
     this.line = line;
+    this.length = length;
   }
   eq(other) {
-    return other.whole === this.whole && other.line === this.line;
+    return other.whole === this.whole && other.line === this.line && other.length === this.length;
   }
   toDOM(view) {
-    return this.plugin.button(this.whole, () => {
+    const button = this.plugin.button(this.whole, () => {
       var _a;
       const file = (_a = view.state.field(import_obsidian.editorInfoField)) == null ? void 0 : _a.file;
       if (file)
         void this.plugin.reset(file, this.whole ? void 0 : this.line);
     });
+    button.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const from = view.posAtDOM(button);
+      view.dispatch({ selection: { anchor: from + this.length } });
+      view.focus();
+    });
+    return button;
   }
 };
 function markerButtons(plugin) {
@@ -357,9 +366,9 @@ function markerButtons(plugin) {
           const start = line.from + ((_a = m.index) != null ? _a : 0), end = start + m[0].length;
           if (((_b = line.text.slice(0, m.index).match(/`/g)) != null ? _b : []).length % 2 === 1)
             continue;
-          if (sel.some((r) => r.from <= end && r.to >= start))
+          if (sel.some((r) => r.from <= line.to && r.to >= line.from))
             continue;
-          builder.add(start, end, import_view.Decoration.replace({ widget: new MarkerWidget(plugin, !!m[1], n - 1) }));
+          builder.add(start, end, import_view.Decoration.replace({ widget: new MarkerWidget(plugin, !!m[1], n - 1, m[0].length) }));
         }
       }
     }

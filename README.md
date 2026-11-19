@@ -6,7 +6,7 @@ Uncheck the tasks in a note, so a checklist can be used again.
 
 - **Command:** **Reset tasks in this note**. Give it a hotkey in Settings → Hotkeys, or add it to the mobile toolbar.
 - **Sidebar button:** resets the note that's open.
-- **A button in the note:** type `[reset-tasks]` anywhere in a note, even at the end of a heading (`## Morning [reset-tasks]`), or run **Insert reset button** from the command palette, which adds it at the end of the line you're on (or on an empty line, right there). It shows as a **Reset tasks** button; in editing view it turns back into text while your cursor is on it, so you can edit or delete it. Where it is decides what it resets:
+- **A button in the note:** type `[reset-tasks]` anywhere in a note, even at the end of a heading (`## Morning [reset-tasks]`), or run **Insert reset button** from the command palette, which adds it at the end of the line you're on (or on an empty line, right there). It shows as a **Reset tasks** button; in editing view it turns back into text while your cursor is on its line, so you can edit or delete it. Long-pressing the button (phones) or right-clicking it does that too, with the cursor right after it. Where it is decides what it resets:
 
   - **On or under a heading:** that heading's section, down to the next heading of the same or a higher level. Subheadings are included, so a button on `## Morning` also resets a `### Extras` inside it. A note with several lists can have a button for each.
   - **Above any heading:** the whole note.
