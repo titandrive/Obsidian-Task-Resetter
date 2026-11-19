@@ -58,22 +58,20 @@ export default class TaskResetter extends Plugin {
 			},
 		});
 
-		// Put a reset button (a reset-tasks block) at the cursor, on its own line.
+		// Put a reset button ([reset-tasks]) at the cursor: on a heading or any line of text, at its end
+		// (it then resets that heading's section, or the one the line is under); on an empty line, there.
 		this.addCommand({
 			id: "insert-button",
 			name: "Insert reset button",
 			editorCallback: (editor) => {
-				// On an empty line the button goes right there; on a line with text, on a new line under it.
-				const cur = editor.getCursor();
-				let at = cur.line;
-				if (editor.getLine(at).trim()) {
-					editor.replaceRange("\n", { line: at, ch: editor.getLine(at).length });
-					at++;
-				}
-				// Keep a line after the block for the cursor, so the block shows as a button straight away.
-				const last = at + 1 >= editor.lineCount();
-				editor.replaceRange("```reset-tasks\n```" + (last ? "\n" : ""), { line: at, ch: 0 }, { line: at, ch: editor.getLine(at).length });
-				editor.setCursor({ line: at + 2, ch: 0 });
+				const line = editor.getCursor().line;
+				const text = editor.getLine(line);
+				const insert = text.trim() ? (text.endsWith(" ") ? "" : " ") + "[reset-tasks]" : "[reset-tasks]";
+				const ch = text.trim() ? text.length : 0;
+				editor.replaceRange(insert, { line, ch }, { line, ch: text.trim() ? ch : text.length });
+				// The cursor moves off the line, so the marker shows as a button straight away.
+				if (line + 1 >= editor.lineCount()) editor.replaceRange("\n", { line, ch: editor.getLine(line).length });
+				editor.setCursor({ line: line + 1, ch: 0 });
 			},
 		});
 

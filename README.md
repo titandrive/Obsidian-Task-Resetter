@@ -13,7 +13,7 @@ Uncheck the tasks in a note, so a checklist can be used again.
   ```
   ````
 
-  Or type `[reset-tasks]` anywhere, even at the end of a heading (`## Morning [reset-tasks]`); it shows as the same button. `[reset-tasks all]` resets the whole note. In editing view it shows as text while your cursor is on it, so you can edit or delete it. Or run **Insert reset button** from the command palette to add a block at the cursor.
+  Or type `[reset-tasks]` anywhere, even at the end of a heading (`## Morning [reset-tasks]`); it shows as the same button. `[reset-tasks all]` resets the whole note. In editing view it shows as text while your cursor is on it, so you can edit or delete it. Or run **Insert reset button** from the command palette: it adds `[reset-tasks]` at the end of the line you're on (a heading, say), or on an empty line, right there.
 
   It shows a **Reset tasks** button. Where you put it decides what it resets:
 

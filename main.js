@@ -61,15 +61,14 @@ var TaskResetter = class extends import_obsidian.Plugin {
       id: "insert-button",
       name: "Insert reset button",
       editorCallback: (editor) => {
-        const cur = editor.getCursor();
-        let at = cur.line;
-        if (editor.getLine(at).trim()) {
-          editor.replaceRange("\n", { line: at, ch: editor.getLine(at).length });
-          at++;
-        }
-        const last = at + 1 >= editor.lineCount();
-        editor.replaceRange("```reset-tasks\n```" + (last ? "\n" : ""), { line: at, ch: 0 }, { line: at, ch: editor.getLine(at).length });
-        editor.setCursor({ line: at + 2, ch: 0 });
+        const line = editor.getCursor().line;
+        const text = editor.getLine(line);
+        const insert = text.trim() ? (text.endsWith(" ") ? "" : " ") + "[reset-tasks]" : "[reset-tasks]";
+        const ch = text.trim() ? text.length : 0;
+        editor.replaceRange(insert, { line, ch }, { line, ch: text.trim() ? ch : text.length });
+        if (line + 1 >= editor.lineCount())
+          editor.replaceRange("\n", { line, ch: editor.getLine(line).length });
+        editor.setCursor({ line: line + 1, ch: 0 });
       }
     });
     this.registerEditorExtension(markerButtons(this));
