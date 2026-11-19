@@ -540,11 +540,16 @@ var HeadingSuggest = class extends import_obsidian.EditorSuggest {
     el.createSpan({ text: item.value });
   }
   selectSuggestion(item) {
+    var _a, _b;
     const ctx = this.context;
     if (!ctx)
       return;
-    const { editor, start, end } = ctx;
-    const closed = editor.getLine(end.line).charAt(end.ch) === "]";
+    const { editor, start } = ctx;
+    const line = editor.getLine(start.line);
+    const rest = line.slice(ctx.end.ch);
+    const tail = (_b = (_a = (item.icon ? /^[\w-]*/ : /^(?:(?!\s(?:icon|label|heading):)[^\]])*/).exec(rest)) == null ? void 0 : _a[0]) != null ? _b : "";
+    const end = { line: start.line, ch: ctx.end.ch + (item.icon ? tail.length : tail.trimEnd().length) };
+    const closed = /^[^[\n]*\]/.test(line.slice(end.ch));
     editor.replaceRange(item.value + (closed ? "" : "]"), start, end);
     editor.setCursor({ line: start.line, ch: start.ch + item.value.length });
   }

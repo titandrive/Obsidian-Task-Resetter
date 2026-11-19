@@ -526,9 +526,15 @@ class HeadingSuggest extends EditorSuggest<{ icon: boolean; value: string }> {
 	selectSuggestion(item: { icon: boolean; value: string }): void {
 		const ctx = this.context;
 		if (!ctx) return;
-		const { editor, start, end } = ctx;
-		// Close the bracket too, unless it's already there; the cursor stays inside, to add more.
-		const closed = editor.getLine(end.line).charAt(end.ch) === "]";
+		const { editor, start } = ctx;
+		const line = editor.getLine(start.line);
+		const rest = line.slice(ctx.end.ch);
+		// Editing an existing value: replace all of it, not just the part before the cursor.
+		const tail = (item.icon ? /^[\w-]*/ : /^(?:(?!\s(?:icon|label|heading):)[^\]])*/).exec(rest)?.[0] ?? "";
+		const end = { line: start.line, ch: ctx.end.ch + (item.icon ? tail.length : tail.trimEnd().length) };
+		// Close the bracket too, unless the marker already has one (later on the line, before another
+		// one starts); the cursor stays inside, to add more.
+		const closed = /^[^[\n]*\]/.test(line.slice(end.ch));
 		editor.replaceRange(item.value + (closed ? "" : "]"), start, end);
 		editor.setCursor({ line: start.line, ch: start.ch + item.value.length });
 	}
