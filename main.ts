@@ -43,6 +43,25 @@ export default class TaskResetter extends Plugin {
 			},
 		});
 
+		// Put a reset button (a reset-tasks block) at the cursor, on its own line.
+		this.addCommand({
+			id: "insert-button",
+			name: "Insert reset button",
+			editorCallback: (editor) => {
+				const cur = editor.getCursor();
+				const line = editor.getLine(cur.line);
+				const block = "```reset-tasks\n```";
+				if (!line.trim()) {
+					editor.replaceRange(block, { line: cur.line, ch: 0 }, { line: cur.line, ch: line.length });
+					editor.setCursor({ line: cur.line + 1, ch: 3 });
+				} else {
+					// The line has text: put the button on a new line under it.
+					editor.replaceRange("\n" + block, { line: cur.line, ch: line.length });
+					editor.setCursor({ line: cur.line + 2, ch: 3 });
+				}
+			},
+		});
+
 		this.addRibbonIcon("list-restart", "Reset tasks in this note", () => {
 			const file = this.app.workspace.getActiveFile();
 			if (!file || file.extension !== "md") { new Notice("Open a note to reset its tasks."); return; }

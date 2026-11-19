@@ -13,6 +13,8 @@ Uncheck the tasks in a note, so a checklist can be used again.
   ```
   ````
 
+  Or run **Insert reset button** from the command palette to add one at the cursor.
+
   It shows a **Reset tasks** button. Where you put it decides what it resets:
 
   - **Under a heading:** that heading's section, from the button down to the next heading of the same or a higher level. Subheadings are included, so a button under `## Morning` also resets a `### Extras` inside it. A note with several lists can have a button for each.

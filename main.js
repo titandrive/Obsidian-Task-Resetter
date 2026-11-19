@@ -52,6 +52,22 @@ var TaskResetter = class extends import_obsidian.Plugin {
         return true;
       }
     });
+    this.addCommand({
+      id: "insert-button",
+      name: "Insert reset button",
+      editorCallback: (editor) => {
+        const cur = editor.getCursor();
+        const line = editor.getLine(cur.line);
+        const block = "```reset-tasks\n```";
+        if (!line.trim()) {
+          editor.replaceRange(block, { line: cur.line, ch: 0 }, { line: cur.line, ch: line.length });
+          editor.setCursor({ line: cur.line + 1, ch: 3 });
+        } else {
+          editor.replaceRange("\n" + block, { line: cur.line, ch: line.length });
+          editor.setCursor({ line: cur.line + 2, ch: 3 });
+        }
+      }
+    });
     this.addRibbonIcon("list-restart", "Reset tasks in this note", () => {
       const file = this.app.workspace.getActiveFile();
       if (!file || file.extension !== "md") {
