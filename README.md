@@ -12,9 +12,16 @@ Uncheck the tasks in a note, so a checklist can be used again.
   - **Above any heading:** the whole note.
   - **`[reset-tasks all]`:** the whole note, wherever it is.
   - **`[reset-tasks ##]`:** every H2 section in the note, subsections included. Works for any level, `#` to `######`.
-  - **`[reset-tasks: Morning]`:** the section of the heading named Morning (ignoring case), wherever the button is. If several headings have that name, all of them are reset. After typing `[reset-tasks: `, the note's headings pop up to pick from, as they do for links.
+  - **`[reset-tasks heading: Morning]`:** the section of the heading named Morning (ignoring case), wherever the button is. If several headings have that name, all of them are reset. `[reset-tasks: Morning]` is short for the same thing. After typing `heading: ` (or `[reset-tasks: `), the note's headings pop up to pick from, as they do for links.
 
   The button says what it resets: **Reset tasks**, **Reset all tasks**, **Reset H2 tasks**, **Reset Morning**.
+
+- **Options:** any button can also take `icon:` and `label:`, in any order, after `all`, `##` or the other options:
+
+  - **`icon: sun`:** a different icon, by its [Lucide](https://lucide.dev/icons) name. After typing `icon: `, matching icons pop up to pick from.
+  - **`label: Morning chores`:** different text on the button. It shows even when **Hide the button label** is on.
+
+  For example: `[reset-tasks heading: Evening icon: moon label: Evening chores]` or `[reset-tasks ## icon: list-checks]`.
 
 ## Details
 

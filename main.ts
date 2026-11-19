@@ -1,4 +1,4 @@
-import { App, Editor, EditorPosition, EditorSuggest, EditorSuggestContext, EditorSuggestTriggerInfo, editorInfoField, editorLivePreviewField, MarkdownView, Notice, Platform, Plugin, PluginSettingTab, Setting, setIcon, TFile } from "obsidian";
+import { App, Editor, getIcon, getIconIds, EditorPosition, EditorSuggest, EditorSuggestContext, EditorSuggestTriggerInfo, editorInfoField, editorLivePreviewField, MarkdownView, Notice, Platform, Plugin, PluginSettingTab, Setting, setIcon, TFile } from "obsidian";
 import { RangeSetBuilder } from "@codemirror/state";
 import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate, WidgetType } from "@codemirror/view";
 
@@ -10,7 +10,8 @@ import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate, WidgetTy
  *   heading (or on it), it resets that heading's section: subheadings included, up to the next
  *   heading of the same or a higher level. Above any heading it resets the whole note, and
  *   [reset-tasks all] always does. [reset-tasks ##] resets every H2 section (any level, # to ######),
- *   and [reset-tasks: Morning] the section of the heading named Morning, wherever the button is.
+ *   and [reset-tasks heading: Morning] the section of the heading named Morning, wherever the button
+ *   is. icon: and label: give a button its own icon and text.
  *   "Insert reset button" adds one at the cursor.
  *
  * When the note is open in the editor, the reset is one edit, so Ctrl/Cmd+Z puts every check back
@@ -24,9 +25,14 @@ interface Settings {
 	haptics: boolean;
 	/** Show the in-note buttons as just the icon, without "Reset tasks". */
 	hideLabel: boolean;
+	/**
+	 * Path data for the icons buttons use (icon: in a marker), by name, kept so the QuickNote widget,
+	 * which can't look Obsidian's icons up, can draw them too.
+	 */
+	iconPaths: Record<string, string>;
 }
 
-const DEFAULTS: Settings = { clearOtherMarkers: false, haptics: true, hideLabel: false };
+const DEFAULTS: Settings = { clearOtherMarkers: false, haptics: true, hideLabel: false, iconPaths: {} };
 
 /** The buttons' icon. */
 const ICON = "rotate-ccw-square";
@@ -35,10 +41,11 @@ const ICON = "rotate-ccw-square";
 const TASK = /^(\s*(?:[-*+]|\d+[.)])\s+\[)([^\]])(\])/;
 
 /**
- * The marker, typed anywhere in a line: [reset-tasks], [reset-tasks all], [reset-tasks ##] (a heading
- * level) or [reset-tasks: Morning] (a heading by name).
+ * The marker, typed anywhere in a line: [reset-tasks], [reset-tasks all] or [reset-tasks ##] (a heading
+ * level), then options, in any order: heading: Morning (the heading named Morning), icon: name (a
+ * Lucide icon), label: text. [reset-tasks: Morning] is short for [reset-tasks heading: Morning]. What's inside is read by [parseMarker]; one it can't read stays text.
  */
-const MARKER = /\[reset-tasks(?: (all)| (#{1,6})|: *([^\]\n]*[^\]\s]))?\]/gi;
+const MARKER = /\[reset-tasks(?=[\s:\]])([^\]\n]*)\]/gi;
 
 /** What a button resets: its own section, the whole note, every heading of a level, or named headings. */
 export type Scope =
@@ -47,12 +54,32 @@ export type Scope =
 	| { kind: "level"; level: number }
 	| { kind: "named"; name: string };
 
-/** The scope a MARKER match asks for. */
-function scopeOf(m: RegExpMatchArray): Scope {
-	if (m[1]) return { kind: "all" };
-	if (m[2]) return { kind: "level", level: m[2].length };
-	if (m[3]) return { kind: "named", name: m[3].trim() };
-	return { kind: "here" };
+/** A marker: what it resets, and its own icon and label if it gives them. */
+export interface Marker { scope: Scope; icon?: string; label?: string }
+
+/** Read a MARKER match: all or ##, then heading:, icon: and label: options. Null if it isn't one. */
+function parseMarker(m: RegExpMatchArray): Marker | null {
+	const inner = m[1] ?? "";
+	const opt = /\s+(icon|label|heading):\s*/gi;
+	const found = [...inner.matchAll(opt)];
+	const head = inner.slice(0, found.length ? found[0].index : inner.length);
+	const out: Marker = { scope: { kind: "here" } };
+	found.forEach((o, i) => {
+		const value = inner.slice((o.index ?? 0) + o[0].length, i + 1 < found.length ? found[i + 1].index : inner.length).trim();
+		if (!value) return;
+		const key = o[1].toLowerCase();
+		if (key === "icon") out.icon = value.toLowerCase();
+		else if (key === "label") out.label = value;
+		else out.scope = { kind: "named", name: value };
+	});
+	const h = /^ (#{1,6})$/.exec(head);
+	// The short form for a heading: [reset-tasks: Morning], the same as heading: Morning.
+	const short = /^:\s*(.*\S)\s*$/.exec(head);
+	if (/^ all$/i.test(head)) out.scope = { kind: "all" };
+	else if (h) out.scope = { kind: "level", level: h[1].length };
+	else if (short) out.scope = { kind: "named", name: short[1] };
+	else if (head !== "") return null;
+	return out;
 }
 
 /** The button's text for a scope. */
@@ -117,9 +144,11 @@ export default class TaskResetter extends Plugin {
 				const frag = el.doc.createDocumentFragment();
 				let last = 0;
 				for (const m of text.matchAll(MARKER)) {
+					const marker = parseMarker(m);
+					if (!marker) continue;
+					const scope = marker.scope;
 					frag.append(text.slice(last, m.index));
-					const scope = scopeOf(m);
-					frag.append(this.button(scope, () => {
+					frag.append(this.button(marker, () => {
 						// Which line: the section this element came from, at the marker's line in it.
 						const info = ctx.getSectionInfo(el);
 						void this.resetAtMarker(file, scope, info ? info.lineStart : undefined, info ? info.lineEnd : undefined);
@@ -164,10 +193,14 @@ export default class TaskResetter extends Plugin {
 	}
 
 	/** The Reset button a [reset-tasks] marker shows as. */
-	button(scope: Scope, onClick: () => void): HTMLElement {
+	button(marker: Marker, onClick: () => void): HTMLElement {
 		const button = createEl("button", { cls: "reset-tasks-button" });
-		const label = labelOf(scope);
-		setIcon(button.createSpan({ cls: "reset-tasks-icon" }), ICON);
+		const label = marker.label ?? labelOf(marker.scope);
+		// Its own label shows even when labels are hidden in settings: it was typed to be seen.
+		if (marker.label) button.addClass("has-own-label");
+		const icon = marker.icon && getIcon(marker.icon) ? marker.icon : ICON;
+		if (icon !== ICON) this.keepIconPath(icon);
+		setIcon(button.createSpan({ cls: "reset-tasks-icon" }), icon);
 		button.createSpan({ cls: "reset-tasks-label", text: label });
 		// Named for screen readers and a hover tooltip, which matters when the label is hidden.
 		button.setAttr("aria-label", label);
@@ -176,6 +209,18 @@ export default class TaskResetter extends Plugin {
 		button.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); this.tap(); onClick(); });
 		return button;
 	}
+
+	/** Remember an icon's path data for the widget (saved once per new icon). */
+	private keepIconPath(name: string): void {
+		if (this.settings.iconPaths[name]) return;
+		const svg = getIcon(name);
+		const d = svg ? svgPath(svg) : "";
+		if (!d) return;
+		this.settings.iconPaths = { ...this.settings.iconPaths, [name]: d };
+		window.clearTimeout(this.saveSoon);
+		this.saveSoon = window.setTimeout(() => void this.saveSettings(), 1000);
+	}
+	private saveSoon = 0;
 
 	/** Reading view: find the marker's line within its section (the first line there that has one). */
 	async resetAtMarker(file: TFile, scope: Scope, from?: number, to?: number): Promise<void> {
@@ -372,26 +417,26 @@ class TaskResetterSettings extends PluginSettingTab {
 			f.appendText(" always does. ");
 			f.createEl("code", { text: "[reset-tasks ##]" });
 			f.appendText(" unchecks every H2 section (or any level, # to ######), and ");
-			f.createEl("code", { text: "[reset-tasks: Morning]" });
-			f.appendText(" the section of the heading named Morning, wherever the button is.");
+			f.createEl("code", { text: "[reset-tasks heading: Morning]" });
+			f.appendText(" the section of the heading named Morning, wherever the button is (or [reset-tasks: Morning] for short). Add icon: name or label: text to any of them for a different icon or text.");
 		}));
 	}
 }
 
 /** The [reset-tasks] marker drawn as a button in the editor. */
 class MarkerWidget extends WidgetType {
-	constructor(private plugin: TaskResetter, private scope: Scope, private line: number, private length: number) {
+	constructor(private plugin: TaskResetter, private marker: Marker, private line: number, private length: number) {
 		super();
 	}
 
 	eq(other: MarkerWidget): boolean {
-		return JSON.stringify(other.scope) === JSON.stringify(this.scope) && other.line === this.line && other.length === this.length;
+		return JSON.stringify(other.marker) === JSON.stringify(this.marker) && other.line === this.line && other.length === this.length;
 	}
 
 	toDOM(view: EditorView): HTMLElement {
-		return this.plugin.button(this.scope, () => {
+		return this.plugin.button(this.marker, () => {
 			const file = view.state.field(editorInfoField)?.file;
-			if (file) void this.plugin.reset(file, this.scope, this.line);
+			if (file) void this.plugin.reset(file, this.marker.scope, this.line);
 		});
 	}
 }
@@ -420,12 +465,14 @@ function markerButtons(plugin: TaskResetter) {
 				if (fenced.has(n)) continue;
 				const line = doc.line(n);
 				for (const m of line.text.matchAll(MARKER)) {
+					const marker = parseMarker(m);
+					if (!marker) continue;
 					const start = line.from + (m.index ?? 0), end = start + m[0].length;
 					// Inside `inline code` (an odd number of backticks before it): leave it.
 					if (((line.text.slice(0, m.index).match(/`/g) ?? []).length % 2) === 1) continue;
 					// The cursor (or a selection) on its line shows it as text, as Obsidian does with other markup.
 					if (sel.some((r) => r.from <= line.to && r.to >= line.from)) continue;
-					builder.add(start, end, Decoration.replace({ widget: new MarkerWidget(plugin, scopeOf(m), n - 1, m[0].length) }));
+					builder.add(start, end, Decoration.replace({ widget: new MarkerWidget(plugin, marker, n - 1, m[0].length) }));
 				}
 			}
 		}
@@ -442,11 +489,23 @@ function markerButtons(plugin: TaskResetter) {
 	}, { decorations: (v) => v.decorations });
 }
 
-/** Typing [reset-tasks: lists the note's headings, as [[Note# does for links; picking one fills it in. */
-class HeadingSuggest extends EditorSuggest<string> {
-	getSuggestions(ctx: EditorSuggestContext): string[] {
+/**
+ * Autocomplete in a marker: after heading: (or [reset-tasks:) the note's headings (as [[Note# does for links), and
+ * after icon: Obsidian's icons, shown as you type. Picking one fills it in.
+ */
+class HeadingSuggest extends EditorSuggest<{ icon: boolean; value: string }> {
+	private icons = false;
+
+	getSuggestions(ctx: EditorSuggestContext): { icon: boolean; value: string }[] {
+		const q = ctx.query.toLowerCase();
+		if (this.icons) {
+			const names = getIconIds().map((id) => id.replace(/^lucide-/, ""));
+			const starts = names.filter((n) => n.startsWith(q));
+			const has = names.filter((n) => !n.startsWith(q) && n.includes(q));
+			return [...new Set([...starts, ...has])].slice(0, 60).map((value) => ({ icon: true, value }));
+		}
 		const seen = new Set<string>();
-		const out: string[] = [];
+		const out: { icon: boolean; value: string }[] = [];
 		let fence = false;
 		for (const line of ctx.editor.getValue().split("\n")) {
 			if (/^\s*(```|~~~)/.test(line)) { fence = !fence; continue; }
@@ -454,29 +513,70 @@ class HeadingSuggest extends EditorSuggest<string> {
 			const text = line.replace(/^#{1,6}\s+/, "").replace(MARKER, "").replace(/\s+#+\s*$/, "").trim();
 			if (!text || seen.has(text.toLowerCase())) continue;
 			seen.add(text.toLowerCase());
-			if (text.toLowerCase().includes(ctx.query.toLowerCase())) out.push(text);
+			if (text.toLowerCase().includes(q)) out.push({ icon: false, value: text });
 		}
 		return out;
 	}
 
 	onTrigger(cursor: EditorPosition, editor: Editor): EditorSuggestTriggerInfo | null {
 		const before = editor.getLine(cursor.line).slice(0, cursor.ch);
-		const m = /\[reset-tasks: *([^\]]*)$/i.exec(before);
+		const icon = /\[reset-tasks[^\]\n]*\sicon:\s*([\w-]*)$/i.exec(before);
+		const heading = icon ? null : /\[reset-tasks(?:[^\]\n]*\sheading:\s*|: *)((?:(?!\s(?:icon|label|heading):)[^\]])*)$/i.exec(before);
+		const m = icon ?? heading;
 		if (!m) return null;
+		this.icons = !!icon;
 		return { start: { line: cursor.line, ch: before.length - m[1].length }, end: cursor, query: m[1] };
 	}
 
-	renderSuggestion(heading: string, el: HTMLElement): void {
-		el.setText(heading);
+	renderSuggestion(item: { icon: boolean; value: string }, el: HTMLElement): void {
+		if (item.icon) {
+			el.addClass("reset-tasks-icon-suggestion");
+			setIcon(el.createSpan(), item.value);
+		}
+		el.createSpan({ text: item.value });
 	}
 
-	selectSuggestion(heading: string): void {
+	selectSuggestion(item: { icon: boolean; value: string }): void {
 		const ctx = this.context;
 		if (!ctx) return;
 		const { editor, start, end } = ctx;
-		// Close the bracket too, unless it's already there.
+		// Close the bracket too, unless it's already there; the cursor stays inside, to add more.
 		const closed = editor.getLine(end.line).charAt(end.ch) === "]";
-		editor.replaceRange(heading + (closed ? "" : "]"), start, end);
-		editor.setCursor({ line: start.line, ch: start.ch + heading.length + 1 });
+		editor.replaceRange(item.value + (closed ? "" : "]"), start, end);
+		editor.setCursor({ line: start.line, ch: start.ch + item.value.length });
 	}
+}
+
+/** An icon's SVG as one path's data (circles, rects, lines and polylines turned into path commands). */
+function svgPath(svg: SVGSVGElement): string {
+	const n = (el: Element, a: string) => parseFloat(el.getAttribute(a) ?? "0") || 0;
+	const parts: string[] = [];
+	for (const el of Array.from(svg.querySelectorAll("path, circle, ellipse, rect, line, polyline, polygon"))) {
+		switch (el.tagName.toLowerCase()) {
+			case "path": parts.push(el.getAttribute("d") ?? ""); break;
+			case "circle": case "ellipse": {
+				const cx = n(el, "cx"), cy = n(el, "cy");
+				const rx = el.hasAttribute("r") ? n(el, "r") : n(el, "rx"), ry = el.hasAttribute("r") ? rx : n(el, "ry");
+				parts.push(`M${cx - rx} ${cy}a${rx} ${ry} 0 1 0 ${2 * rx} 0a${rx} ${ry} 0 1 0 ${-2 * rx} 0`);
+				break;
+			}
+			case "rect": {
+				const x = n(el, "x"), y = n(el, "y"), w = n(el, "width"), h = n(el, "height");
+				const r = Math.min(n(el, "rx") || n(el, "ry"), w / 2, h / 2);
+				parts.push(r
+					? `M${x + r} ${y}h${w - 2 * r}a${r} ${r} 0 0 1 ${r} ${r}v${h - 2 * r}a${r} ${r} 0 0 1 ${-r} ${r}h${-(w - 2 * r)}a${r} ${r} 0 0 1 ${-r} ${-r}v${-(h - 2 * r)}a${r} ${r} 0 0 1 ${r} ${-r}z`
+					: `M${x} ${y}h${w}v${h}h${-w}z`);
+				break;
+			}
+			case "line": parts.push(`M${n(el, "x1")} ${n(el, "y1")}L${n(el, "x2")} ${n(el, "y2")}`); break;
+			default: {
+				const pts = (el.getAttribute("points") ?? "").trim().split(/[\s,]+/).map(Number);
+				if (pts.length < 4) break;
+				let d = `M${pts[0]} ${pts[1]}`;
+				for (let i = 2; i + 1 < pts.length; i += 2) d += `L${pts[i]} ${pts[i + 1]}`;
+				parts.push(el.tagName.toLowerCase() === "polygon" ? d + "z" : d);
+			}
+		}
+	}
+	return parts.join(" ");
 }

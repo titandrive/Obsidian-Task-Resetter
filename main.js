@@ -30,18 +30,41 @@ module.exports = __toCommonJS(main_exports);
 var import_obsidian = require("obsidian");
 var import_state = require("@codemirror/state");
 var import_view = require("@codemirror/view");
-var DEFAULTS = { clearOtherMarkers: false, haptics: true, hideLabel: false };
+var DEFAULTS = { clearOtherMarkers: false, haptics: true, hideLabel: false, iconPaths: {} };
 var ICON = "rotate-ccw-square";
 var TASK = /^(\s*(?:[-*+]|\d+[.)])\s+\[)([^\]])(\])/;
-var MARKER = /\[reset-tasks(?: (all)| (#{1,6})|: *([^\]\n]*[^\]\s]))?\]/gi;
-function scopeOf(m) {
-  if (m[1])
-    return { kind: "all" };
-  if (m[2])
-    return { kind: "level", level: m[2].length };
-  if (m[3])
-    return { kind: "named", name: m[3].trim() };
-  return { kind: "here" };
+var MARKER = /\[reset-tasks(?=[\s:\]])([^\]\n]*)\]/gi;
+function parseMarker(m) {
+  var _a;
+  const inner = (_a = m[1]) != null ? _a : "";
+  const opt = /\s+(icon|label|heading):\s*/gi;
+  const found = [...inner.matchAll(opt)];
+  const head = inner.slice(0, found.length ? found[0].index : inner.length);
+  const out = { scope: { kind: "here" } };
+  found.forEach((o, i) => {
+    var _a2;
+    const value = inner.slice(((_a2 = o.index) != null ? _a2 : 0) + o[0].length, i + 1 < found.length ? found[i + 1].index : inner.length).trim();
+    if (!value)
+      return;
+    const key = o[1].toLowerCase();
+    if (key === "icon")
+      out.icon = value.toLowerCase();
+    else if (key === "label")
+      out.label = value;
+    else
+      out.scope = { kind: "named", name: value };
+  });
+  const h = /^ (#{1,6})$/.exec(head);
+  const short = /^:\s*(.*\S)\s*$/.exec(head);
+  if (/^ all$/i.test(head))
+    out.scope = { kind: "all" };
+  else if (h)
+    out.scope = { kind: "level", level: h[1].length };
+  else if (short)
+    out.scope = { kind: "named", name: short[1] };
+  else if (head !== "")
+    return null;
+  return out;
 }
 function labelOf(scope) {
   switch (scope.kind) {
@@ -63,6 +86,7 @@ var TaskResetter = class extends import_obsidian.Plugin {
   constructor() {
     super(...arguments);
     this.settings = DEFAULTS;
+    this.saveSoon = 0;
   }
   async onload() {
     var _a;
@@ -104,9 +128,12 @@ var TaskResetter = class extends import_obsidian.Plugin {
         const frag = el.doc.createDocumentFragment();
         let last = 0;
         for (const m of text.matchAll(MARKER)) {
+          const marker = parseMarker(m);
+          if (!marker)
+            continue;
+          const scope = marker.scope;
           frag.append(text.slice(last, m.index));
-          const scope = scopeOf(m);
-          frag.append(this.button(scope, () => {
+          frag.append(this.button(marker, () => {
             const info = ctx.getSectionInfo(el);
             void this.resetAtMarker(file, scope, info ? info.lineStart : void 0, info ? info.lineEnd : void 0);
           }));
@@ -155,10 +182,16 @@ var TaskResetter = class extends import_obsidian.Plugin {
       (_a = navigator.vibrate) == null ? void 0 : _a.call(navigator, 20);
   }
   /** The Reset button a [reset-tasks] marker shows as. */
-  button(scope, onClick) {
+  button(marker, onClick) {
+    var _a;
     const button = createEl("button", { cls: "reset-tasks-button" });
-    const label = labelOf(scope);
-    (0, import_obsidian.setIcon)(button.createSpan({ cls: "reset-tasks-icon" }), ICON);
+    const label = (_a = marker.label) != null ? _a : labelOf(marker.scope);
+    if (marker.label)
+      button.addClass("has-own-label");
+    const icon = marker.icon && (0, import_obsidian.getIcon)(marker.icon) ? marker.icon : ICON;
+    if (icon !== ICON)
+      this.keepIconPath(icon);
+    (0, import_obsidian.setIcon)(button.createSpan({ cls: "reset-tasks-icon" }), icon);
     button.createSpan({ cls: "reset-tasks-label", text: label });
     button.setAttr("aria-label", label);
     button.addEventListener("mousedown", (e) => {
@@ -172,6 +205,18 @@ var TaskResetter = class extends import_obsidian.Plugin {
       onClick();
     });
     return button;
+  }
+  /** Remember an icon's path data for the widget (saved once per new icon). */
+  keepIconPath(name) {
+    if (this.settings.iconPaths[name])
+      return;
+    const svg = (0, import_obsidian.getIcon)(name);
+    const d = svg ? svgPath(svg) : "";
+    if (!d)
+      return;
+    this.settings.iconPaths = { ...this.settings.iconPaths, [name]: d };
+    window.clearTimeout(this.saveSoon);
+    this.saveSoon = window.setTimeout(() => void this.saveSettings(), 1e3);
   }
   /** Reading view: find the marker's line within its section (the first line there that has one). */
   async resetAtMarker(file, scope, from, to) {
@@ -382,28 +427,28 @@ var TaskResetterSettings = class extends import_obsidian.PluginSettingTab {
       f.appendText(" always does. ");
       f.createEl("code", { text: "[reset-tasks ##]" });
       f.appendText(" unchecks every H2 section (or any level, # to ######), and ");
-      f.createEl("code", { text: "[reset-tasks: Morning]" });
-      f.appendText(" the section of the heading named Morning, wherever the button is.");
+      f.createEl("code", { text: "[reset-tasks heading: Morning]" });
+      f.appendText(" the section of the heading named Morning, wherever the button is (or [reset-tasks: Morning] for short). Add icon: name or label: text to any of them for a different icon or text.");
     }));
   }
 };
 var MarkerWidget = class extends import_view.WidgetType {
-  constructor(plugin, scope, line, length) {
+  constructor(plugin, marker, line, length) {
     super();
     this.plugin = plugin;
-    this.scope = scope;
+    this.marker = marker;
     this.line = line;
     this.length = length;
   }
   eq(other) {
-    return JSON.stringify(other.scope) === JSON.stringify(this.scope) && other.line === this.line && other.length === this.length;
+    return JSON.stringify(other.marker) === JSON.stringify(this.marker) && other.line === this.line && other.length === this.length;
   }
   toDOM(view) {
-    return this.plugin.button(this.scope, () => {
+    return this.plugin.button(this.marker, () => {
       var _a;
       const file = (_a = view.state.field(import_obsidian.editorInfoField)) == null ? void 0 : _a.file;
       if (file)
-        void this.plugin.reset(file, this.scope, this.line);
+        void this.plugin.reset(file, this.marker.scope, this.line);
     });
   }
 };
@@ -431,12 +476,15 @@ function markerButtons(plugin) {
           continue;
         const line = doc.line(n);
         for (const m of line.text.matchAll(MARKER)) {
+          const marker = parseMarker(m);
+          if (!marker)
+            continue;
           const start = line.from + ((_a = m.index) != null ? _a : 0), end = start + m[0].length;
           if (((_b = line.text.slice(0, m.index).match(/`/g)) != null ? _b : []).length % 2 === 1)
             continue;
           if (sel.some((r) => r.from <= line.to && r.to >= line.from))
             continue;
-          builder.add(start, end, import_view.Decoration.replace({ widget: new MarkerWidget(plugin, scopeOf(m), n - 1, m[0].length) }));
+          builder.add(start, end, import_view.Decoration.replace({ widget: new MarkerWidget(plugin, marker, n - 1, m[0].length) }));
         }
       }
     }
@@ -454,7 +502,18 @@ function markerButtons(plugin) {
   }, { decorations: (v) => v.decorations });
 }
 var HeadingSuggest = class extends import_obsidian.EditorSuggest {
+  constructor() {
+    super(...arguments);
+    this.icons = false;
+  }
   getSuggestions(ctx) {
+    const q = ctx.query.toLowerCase();
+    if (this.icons) {
+      const names = (0, import_obsidian.getIconIds)().map((id) => id.replace(/^lucide-/, ""));
+      const starts = names.filter((n) => n.startsWith(q));
+      const has = names.filter((n) => !n.startsWith(q) && n.includes(q));
+      return [.../* @__PURE__ */ new Set([...starts, ...has])].slice(0, 60).map((value) => ({ icon: true, value }));
+    }
     const seen = /* @__PURE__ */ new Set();
     const out = [];
     let fence = false;
@@ -469,28 +528,76 @@ var HeadingSuggest = class extends import_obsidian.EditorSuggest {
       if (!text || seen.has(text.toLowerCase()))
         continue;
       seen.add(text.toLowerCase());
-      if (text.toLowerCase().includes(ctx.query.toLowerCase()))
-        out.push(text);
+      if (text.toLowerCase().includes(q))
+        out.push({ icon: false, value: text });
     }
     return out;
   }
   onTrigger(cursor, editor) {
     const before = editor.getLine(cursor.line).slice(0, cursor.ch);
-    const m = /\[reset-tasks: *([^\]]*)$/i.exec(before);
+    const icon = /\[reset-tasks[^\]\n]*\sicon:\s*([\w-]*)$/i.exec(before);
+    const heading = icon ? null : /\[reset-tasks(?:[^\]\n]*\sheading:\s*|: *)((?:(?!\s(?:icon|label|heading):)[^\]])*)$/i.exec(before);
+    const m = icon != null ? icon : heading;
     if (!m)
       return null;
+    this.icons = !!icon;
     return { start: { line: cursor.line, ch: before.length - m[1].length }, end: cursor, query: m[1] };
   }
-  renderSuggestion(heading, el) {
-    el.setText(heading);
+  renderSuggestion(item, el) {
+    if (item.icon) {
+      el.addClass("reset-tasks-icon-suggestion");
+      (0, import_obsidian.setIcon)(el.createSpan(), item.value);
+    }
+    el.createSpan({ text: item.value });
   }
-  selectSuggestion(heading) {
+  selectSuggestion(item) {
     const ctx = this.context;
     if (!ctx)
       return;
     const { editor, start, end } = ctx;
     const closed = editor.getLine(end.line).charAt(end.ch) === "]";
-    editor.replaceRange(heading + (closed ? "" : "]"), start, end);
-    editor.setCursor({ line: start.line, ch: start.ch + heading.length + 1 });
+    editor.replaceRange(item.value + (closed ? "" : "]"), start, end);
+    editor.setCursor({ line: start.line, ch: start.ch + item.value.length });
   }
 };
+function svgPath(svg) {
+  var _a, _b;
+  const n = (el, a) => {
+    var _a2;
+    return parseFloat((_a2 = el.getAttribute(a)) != null ? _a2 : "0") || 0;
+  };
+  const parts = [];
+  for (const el of Array.from(svg.querySelectorAll("path, circle, ellipse, rect, line, polyline, polygon"))) {
+    switch (el.tagName.toLowerCase()) {
+      case "path":
+        parts.push((_a = el.getAttribute("d")) != null ? _a : "");
+        break;
+      case "circle":
+      case "ellipse": {
+        const cx = n(el, "cx"), cy = n(el, "cy");
+        const rx = el.hasAttribute("r") ? n(el, "r") : n(el, "rx"), ry = el.hasAttribute("r") ? rx : n(el, "ry");
+        parts.push(`M${cx - rx} ${cy}a${rx} ${ry} 0 1 0 ${2 * rx} 0a${rx} ${ry} 0 1 0 ${-2 * rx} 0`);
+        break;
+      }
+      case "rect": {
+        const x = n(el, "x"), y = n(el, "y"), w = n(el, "width"), h = n(el, "height");
+        const r = Math.min(n(el, "rx") || n(el, "ry"), w / 2, h / 2);
+        parts.push(r ? `M${x + r} ${y}h${w - 2 * r}a${r} ${r} 0 0 1 ${r} ${r}v${h - 2 * r}a${r} ${r} 0 0 1 ${-r} ${r}h${-(w - 2 * r)}a${r} ${r} 0 0 1 ${-r} ${-r}v${-(h - 2 * r)}a${r} ${r} 0 0 1 ${r} ${-r}z` : `M${x} ${y}h${w}v${h}h${-w}z`);
+        break;
+      }
+      case "line":
+        parts.push(`M${n(el, "x1")} ${n(el, "y1")}L${n(el, "x2")} ${n(el, "y2")}`);
+        break;
+      default: {
+        const pts = ((_b = el.getAttribute("points")) != null ? _b : "").trim().split(/[\s,]+/).map(Number);
+        if (pts.length < 4)
+          break;
+        let d = `M${pts[0]} ${pts[1]}`;
+        for (let i = 2; i + 1 < pts.length; i += 2)
+          d += `L${pts[i]} ${pts[i + 1]}`;
+        parts.push(el.tagName.toLowerCase() === "polygon" ? d + "z" : d);
+      }
+    }
+  }
+  return parts.join(" ");
+}

@@ -25,3 +25,12 @@ button.reset-tasks-button:active { background: var(--background-modifier-active-
 .is-mobile button.reset-tasks-button { height: 2.4em; }
 .is-mobile.task-resetter-icon-only button.reset-tasks-button { width: 2.4em; }
 .is-mobile.task-resetter-icon-only .reset-tasks-icon svg { width: 20px; height: 20px; }
+
+/* A label typed in the marker (label: ...) shows even when labels are hidden. */
+.task-resetter-icon-only button.reset-tasks-button.has-own-label { width: auto; padding: 0 .8em; }
+.task-resetter-icon-only .has-own-label .reset-tasks-label { display: inline; }
+.task-resetter-icon-only .has-own-label .reset-tasks-icon svg { width: 16px; height: 16px; }
+
+/* Icon autocomplete: the icon next to its name. */
+.reset-tasks-icon-suggestion { display: flex; align-items: center; gap: .5em; }
+.reset-tasks-icon-suggestion svg { width: 16px; height: 16px; }
