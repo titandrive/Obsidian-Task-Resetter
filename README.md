@@ -11,6 +11,10 @@ Uncheck the tasks in a note, so a checklist can be used again.
   - **On or under a heading:** that heading's section, down to the next heading of the same or a higher level. Subheadings are included, so a button on `## Morning` also resets a `### Extras` inside it. A note with several lists can have a button for each.
   - **Above any heading:** the whole note.
   - **`[reset-tasks all]`:** the whole note, wherever it is.
+  - **`[reset-tasks ##]`:** every H2 section in the note, subsections included. Works for any level, `#` to `######`.
+  - **`[reset-tasks: Morning]`:** the section of the heading named Morning (ignoring case), wherever the button is. If several headings have that name, all of them are reset. After typing `[reset-tasks: `, the note's headings pop up to pick from, as they do for links.
+
+  The button says what it resets: **Reset tasks**, **Reset all tasks**, **Reset H2 tasks**, **Reset Morning**.
 
 ## Details
 

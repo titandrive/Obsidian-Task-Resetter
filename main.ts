@@ -1,4 +1,4 @@
-import { App, Editor, editorInfoField, editorLivePreviewField, MarkdownView, Notice, Platform, Plugin, PluginSettingTab, Setting, setIcon, TFile } from "obsidian";
+import { App, Editor, EditorPosition, EditorSuggest, EditorSuggestContext, EditorSuggestTriggerInfo, editorInfoField, editorLivePreviewField, MarkdownView, Notice, Platform, Plugin, PluginSettingTab, Setting, setIcon, TFile } from "obsidian";
 import { RangeSetBuilder } from "@codemirror/state";
 import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate, WidgetType } from "@codemirror/view";
 
@@ -9,7 +9,9 @@ import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate, WidgetTy
  * - [reset-tasks] typed anywhere in a note, even at the end of a heading, shows as a button. Under a
  *   heading (or on it), it resets that heading's section: subheadings included, up to the next
  *   heading of the same or a higher level. Above any heading it resets the whole note, and
- *   [reset-tasks all] always does. "Insert reset button" adds one at the cursor.
+ *   [reset-tasks all] always does. [reset-tasks ##] resets every H2 section (any level, # to ######),
+ *   and [reset-tasks: Morning] the section of the heading named Morning, wherever the button is.
+ *   "Insert reset button" adds one at the cursor.
  *
  * When the note is open in the editor, the reset is one edit, so Ctrl/Cmd+Z puts every check back
  * (focus goes back to the text afterwards, so it works straight away). The notice also has an Undo.
@@ -32,8 +34,41 @@ const ICON = "rotate-ccw-square";
 /** A task line: indentation, a list marker, then [ ] with something in the box. */
 const TASK = /^(\s*(?:[-*+]|\d+[.)])\s+\[)([^\]])(\])/;
 
-/** The short form: [reset-tasks] or [reset-tasks all], typed anywhere in a line. */
-const MARKER = /\[reset-tasks( all)?\]/gi;
+/**
+ * The marker, typed anywhere in a line: [reset-tasks], [reset-tasks all], [reset-tasks ##] (a heading
+ * level) or [reset-tasks: Morning] (a heading by name).
+ */
+const MARKER = /\[reset-tasks(?: (all)| (#{1,6})|: *([^\]\n]*[^\]\s]))?\]/gi;
+
+/** What a button resets: its own section, the whole note, every heading of a level, or named headings. */
+export type Scope =
+	| { kind: "here" }
+	| { kind: "all" }
+	| { kind: "level"; level: number }
+	| { kind: "named"; name: string };
+
+/** The scope a MARKER match asks for. */
+function scopeOf(m: RegExpMatchArray): Scope {
+	if (m[1]) return { kind: "all" };
+	if (m[2]) return { kind: "level", level: m[2].length };
+	if (m[3]) return { kind: "named", name: m[3].trim() };
+	return { kind: "here" };
+}
+
+/** The button's text for a scope. */
+function labelOf(scope: Scope): string {
+	switch (scope.kind) {
+		case "all": return "Reset all tasks";
+		case "level": return `Reset H${scope.level} tasks`;
+		case "named": return `Reset ${scope.name}`;
+		default: return "Reset tasks";
+	}
+}
+
+/** A heading's text, without its #s, a closing #s run, or reset markers: what [reset-tasks: ...] matches. */
+function headingText(line: string): string {
+	return line.replace(/^#{1,6}\s+/, "").replace(MARKER, "").replace(/\s+#+\s*$/, "").trim().toLowerCase();
+}
 
 /** A Markdown heading line (outside code blocks; callers skip fenced code). */
 const HEADING = /^(#{1,6})\s/;
@@ -52,7 +87,7 @@ export default class TaskResetter extends Plugin {
 			checkCallback: (checking) => {
 				const file = this.app.workspace.getActiveFile();
 				if (!file || file.extension !== "md") return false;
-				if (!checking) void this.reset(file);
+				if (!checking) void this.reset(file, { kind: "all" });
 				return true;
 			},
 		});
@@ -68,6 +103,7 @@ export default class TaskResetter extends Plugin {
 		// [reset-tasks] typed in a note: a button in editing view (shown as text while the cursor is on
 		// it, so it can be edited) and in reading view.
 		this.registerEditorExtension(markerButtons(this));
+		this.registerEditorSuggest(new HeadingSuggest(this.app));
 		this.registerMarkdownPostProcessor((el, ctx) => {
 			const file = this.app.vault.getAbstractFileByPath(ctx.sourcePath);
 			if (!(file instanceof TFile)) return;
@@ -82,11 +118,11 @@ export default class TaskResetter extends Plugin {
 				let last = 0;
 				for (const m of text.matchAll(MARKER)) {
 					frag.append(text.slice(last, m.index));
-					const whole = !!m[1];
-					frag.append(this.button(whole, () => {
+					const scope = scopeOf(m);
+					frag.append(this.button(scope, () => {
 						// Which line: the section this element came from, at the marker's line in it.
 						const info = ctx.getSectionInfo(el);
-						void this.resetAtMarker(file, whole, info ? info.lineStart : undefined, info ? info.lineEnd : undefined);
+						void this.resetAtMarker(file, scope, info ? info.lineStart : undefined, info ? info.lineEnd : undefined);
 					}));
 					last = (m.index ?? 0) + m[0].length;
 				}
@@ -99,7 +135,7 @@ export default class TaskResetter extends Plugin {
 			this.tap();
 			const file = this.app.workspace.getActiveFile();
 			if (!file || file.extension !== "md") { new Notice("Open a note to reset its tasks."); return; }
-			void this.reset(file);
+			void this.reset(file, { kind: "all" });
 		});
 		this.addRibbonIcon("square-plus", "Insert reset button", () => {
 			this.tap();
@@ -128,9 +164,9 @@ export default class TaskResetter extends Plugin {
 	}
 
 	/** The Reset button a [reset-tasks] marker shows as. */
-	button(whole: boolean, onClick: () => void): HTMLElement {
+	button(scope: Scope, onClick: () => void): HTMLElement {
 		const button = createEl("button", { cls: "reset-tasks-button" });
-		const label = whole ? "Reset all tasks" : "Reset tasks";
+		const label = labelOf(scope);
 		setIcon(button.createSpan({ cls: "reset-tasks-icon" }), ICON);
 		button.createSpan({ cls: "reset-tasks-label", text: label });
 		// Named for screen readers and a hover tooltip, which matters when the label is hidden.
@@ -142,12 +178,13 @@ export default class TaskResetter extends Plugin {
 	}
 
 	/** Reading view: find the marker's line within its section (the first line there that has one). */
-	async resetAtMarker(file: TFile, whole: boolean, from?: number, to?: number): Promise<void> {
-		if (whole || from === undefined || to === undefined) return this.reset(file);
+	async resetAtMarker(file: TFile, scope: Scope, from?: number, to?: number): Promise<void> {
+		if (scope.kind !== "here") return this.reset(file, scope);
+		if (from === undefined || to === undefined) return this.reset(file, { kind: "all" });
 		const lines = (await this.app.vault.cachedRead(file)).split("\n");
 		let at = from;
 		for (let i = from; i <= to && i < lines.length; i++) if (/\[reset-tasks/i.test(lines[i])) { at = i; break; }
-		return this.reset(file, at);
+		return this.reset(file, scope, at);
 	}
 
 	/** The box's mark, if this line is a task that should be cleared. */
@@ -158,12 +195,16 @@ export default class TaskResetter extends Plugin {
 	}
 
 	/**
-	 * Lines to clear. Without `at`, the whole note. With it (the line a [reset-tasks] marker is on):
-	 * the section of the heading the button sits under, from the button down to the next heading of the
-	 * same or a higher level, subheadings included; or the whole note if no heading is above it. Fenced
-	 * code is skipped, so task-like lines in code examples are left alone.
+	 * Lines to clear, or null when the scope names headings the note doesn't have. Fenced code is
+	 * skipped, so task-like lines in code examples are left alone.
+	 * - all: the whole note.
+	 * - here (`at` is the marker's line): the section of the heading the button sits on or under, down
+	 *   to the next heading of the same or a higher level, subheadings included; or the whole note if no
+	 *   heading is above it.
+	 * - level: every section of a heading of that level, subheadings included.
+	 * - named: the section of each heading with that text (ignoring case).
 	 */
-	private targets(lines: string[], at?: number): number[] {
+	private targets(lines: string[], scope: Scope, at?: number): number[] | null {
 		const fenced: boolean[] = [];
 		let fence = false;
 		for (const line of lines) {
@@ -172,29 +213,45 @@ export default class TaskResetter extends Plugin {
 			fenced.push(fence || marker);
 		}
 		const level = (i: number) => (fenced[i] ? 0 : HEADING.exec(lines[i])?.[1].length ?? 0);
-		let from = 0, to = lines.length;
-		if (at !== undefined) {
-			let own = 0;
-			for (let i = at; i >= 0 && !own; i--) own = level(i);
-			if (own) {
-				from = at + 1;
-				for (let i = from; i < lines.length; i++) if (level(i) && level(i) <= own) { to = i; break; }
+		// The lines of the section a heading at line h starts (to the next heading as high or higher).
+		const ranges: [number, number][] = [];
+		const section = (h: number) => {
+			let to = lines.length;
+			for (let i = h + 1; i < lines.length; i++) if (level(i) && level(i) <= level(h)) { to = i; break; }
+			ranges.push([h + 1, to]);
+		};
+		if (scope.kind === "here" && at !== undefined) {
+			let own = -1;
+			for (let i = at; i >= 0 && own < 0; i--) if (level(i)) own = i;
+			if (own >= 0) section(own);
+			else ranges.push([0, lines.length]);
+		} else if (scope.kind === "level" || scope.kind === "named") {
+			const name = scope.kind === "named" ? scope.name.toLowerCase() : "";
+			for (let i = 0; i < lines.length; i++) {
+				if (!level(i)) continue;
+				if (scope.kind === "level" ? level(i) === scope.level : headingText(lines[i]) === name) section(i);
 			}
+			if (!ranges.length) return null;
+		} else {
+			ranges.push([0, lines.length]);
 		}
-		const out: number[] = [];
-		for (let i = from; i < to; i++) if (!fenced[i] && this.clears(lines[i])) out.push(i);
-		return out;
+		const out = new Set<number>();
+		for (const [from, to] of ranges) for (let i = from; i < to; i++) if (!fenced[i] && this.clears(lines[i])) out.add(i);
+		return [...out].sort((x, y) => x - y);
 	}
 
 	/** Uncheck the tasks: through the editor when the note is open there (so it's one undo), else in the file. */
-	async reset(file: TFile, at?: number): Promise<void> {
+	async reset(file: TFile, scope: Scope, at?: number): Promise<void> {
 		const editor = this.editorFor(file);
 		let count = 0;
+		let missing = false;
 		let before = "", after = "";
 		if (editor) {
 			before = editor.getValue();
 			const lines = before.split("\n");
-			const hits = this.targets(lines, at);
+			const found = this.targets(lines, scope, at);
+			missing = !found;
+			const hits = found ?? [];
 			count = hits.length;
 			if (count) {
 				editor.transaction({
@@ -214,11 +271,17 @@ export default class TaskResetter extends Plugin {
 			await this.app.vault.process(file, (text) => {
 				before = text;
 				const lines = text.split("\n");
-				const hits = this.targets(lines, at);
+				const found = this.targets(lines, scope, at);
+				missing = !found;
+				const hits = found ?? [];
 				count = hits.length;
 				for (const line of hits) lines[line] = lines[line].replace(TASK, "$1 $3");
 				return (after = lines.join("\n"));
 			});
+		}
+		if (missing) {
+			new Notice(scope.kind === "level" ? `No H${scope.level} headings in this note.` : `No heading named "${scope.kind === "named" ? scope.name : ""}" in this note.`);
+			return;
 		}
 		if (!count) { new Notice("Nothing to uncheck."); return; }
 		// The notice has an Undo too (works in reading view, where there's no editor to undo in).
@@ -306,25 +369,29 @@ class TaskResetterSettings extends PluginSettingTab {
 			f.createEl("code", { text: "[reset-tasks]" });
 			f.appendText(" anywhere in a note, even at the end of a heading, or use the \"Insert reset button\" command. Under a heading, its button unchecks that heading's section (subheadings included); above any heading it unchecks the whole note, and ");
 			f.createEl("code", { text: "[reset-tasks all]" });
-			f.appendText(" always does.");
+			f.appendText(" always does. ");
+			f.createEl("code", { text: "[reset-tasks ##]" });
+			f.appendText(" unchecks every H2 section (or any level, # to ######), and ");
+			f.createEl("code", { text: "[reset-tasks: Morning]" });
+			f.appendText(" the section of the heading named Morning, wherever the button is.");
 		}));
 	}
 }
 
 /** The [reset-tasks] marker drawn as a button in the editor. */
 class MarkerWidget extends WidgetType {
-	constructor(private plugin: TaskResetter, private whole: boolean, private line: number, private length: number) {
+	constructor(private plugin: TaskResetter, private scope: Scope, private line: number, private length: number) {
 		super();
 	}
 
 	eq(other: MarkerWidget): boolean {
-		return other.whole === this.whole && other.line === this.line && other.length === this.length;
+		return JSON.stringify(other.scope) === JSON.stringify(this.scope) && other.line === this.line && other.length === this.length;
 	}
 
 	toDOM(view: EditorView): HTMLElement {
-		return this.plugin.button(this.whole, () => {
+		return this.plugin.button(this.scope, () => {
 			const file = view.state.field(editorInfoField)?.file;
-			if (file) void this.plugin.reset(file, this.whole ? undefined : this.line);
+			if (file) void this.plugin.reset(file, this.scope, this.line);
 		});
 	}
 }
@@ -358,7 +425,7 @@ function markerButtons(plugin: TaskResetter) {
 					if (((line.text.slice(0, m.index).match(/`/g) ?? []).length % 2) === 1) continue;
 					// The cursor (or a selection) on its line shows it as text, as Obsidian does with other markup.
 					if (sel.some((r) => r.from <= line.to && r.to >= line.from)) continue;
-					builder.add(start, end, Decoration.replace({ widget: new MarkerWidget(plugin, !!m[1], n - 1, m[0].length) }));
+					builder.add(start, end, Decoration.replace({ widget: new MarkerWidget(plugin, scopeOf(m), n - 1, m[0].length) }));
 				}
 			}
 		}
@@ -373,4 +440,43 @@ function markerButtons(plugin: TaskResetter) {
 			}
 		}
 	}, { decorations: (v) => v.decorations });
+}
+
+/** Typing [reset-tasks: lists the note's headings, as [[Note# does for links; picking one fills it in. */
+class HeadingSuggest extends EditorSuggest<string> {
+	getSuggestions(ctx: EditorSuggestContext): string[] {
+		const seen = new Set<string>();
+		const out: string[] = [];
+		let fence = false;
+		for (const line of ctx.editor.getValue().split("\n")) {
+			if (/^\s*(```|~~~)/.test(line)) { fence = !fence; continue; }
+			if (fence || !HEADING.test(line)) continue;
+			const text = line.replace(/^#{1,6}\s+/, "").replace(MARKER, "").replace(/\s+#+\s*$/, "").trim();
+			if (!text || seen.has(text.toLowerCase())) continue;
+			seen.add(text.toLowerCase());
+			if (text.toLowerCase().includes(ctx.query.toLowerCase())) out.push(text);
+		}
+		return out;
+	}
+
+	onTrigger(cursor: EditorPosition, editor: Editor): EditorSuggestTriggerInfo | null {
+		const before = editor.getLine(cursor.line).slice(0, cursor.ch);
+		const m = /\[reset-tasks: *([^\]]*)$/i.exec(before);
+		if (!m) return null;
+		return { start: { line: cursor.line, ch: before.length - m[1].length }, end: cursor, query: m[1] };
+	}
+
+	renderSuggestion(heading: string, el: HTMLElement): void {
+		el.setText(heading);
+	}
+
+	selectSuggestion(heading: string): void {
+		const ctx = this.context;
+		if (!ctx) return;
+		const { editor, start, end } = ctx;
+		// Close the bracket too, unless it's already there.
+		const closed = editor.getLine(end.line).charAt(end.ch) === "]";
+		editor.replaceRange(heading + (closed ? "" : "]"), start, end);
+		editor.setCursor({ line: start.line, ch: start.ch + heading.length + 1 });
+	}
 }

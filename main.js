@@ -33,7 +33,31 @@ var import_view = require("@codemirror/view");
 var DEFAULTS = { clearOtherMarkers: false, haptics: true, hideLabel: false };
 var ICON = "rotate-ccw-square";
 var TASK = /^(\s*(?:[-*+]|\d+[.)])\s+\[)([^\]])(\])/;
-var MARKER = /\[reset-tasks( all)?\]/gi;
+var MARKER = /\[reset-tasks(?: (all)| (#{1,6})|: *([^\]\n]*[^\]\s]))?\]/gi;
+function scopeOf(m) {
+  if (m[1])
+    return { kind: "all" };
+  if (m[2])
+    return { kind: "level", level: m[2].length };
+  if (m[3])
+    return { kind: "named", name: m[3].trim() };
+  return { kind: "here" };
+}
+function labelOf(scope) {
+  switch (scope.kind) {
+    case "all":
+      return "Reset all tasks";
+    case "level":
+      return `Reset H${scope.level} tasks`;
+    case "named":
+      return `Reset ${scope.name}`;
+    default:
+      return "Reset tasks";
+  }
+}
+function headingText(line) {
+  return line.replace(/^#{1,6}\s+/, "").replace(MARKER, "").replace(/\s+#+\s*$/, "").trim().toLowerCase();
+}
 var HEADING = /^(#{1,6})\s/;
 var TaskResetter = class extends import_obsidian.Plugin {
   constructor() {
@@ -53,7 +77,7 @@ var TaskResetter = class extends import_obsidian.Plugin {
         if (!file || file.extension !== "md")
           return false;
         if (!checking)
-          void this.reset(file);
+          void this.reset(file, { kind: "all" });
         return true;
       }
     });
@@ -63,6 +87,7 @@ var TaskResetter = class extends import_obsidian.Plugin {
       editorCallback: (editor) => this.insertButton(editor)
     });
     this.registerEditorExtension(markerButtons(this));
+    this.registerEditorSuggest(new HeadingSuggest(this.app));
     this.registerMarkdownPostProcessor((el, ctx) => {
       var _a2, _b, _c, _d;
       const file = this.app.vault.getAbstractFileByPath(ctx.sourcePath);
@@ -80,10 +105,10 @@ var TaskResetter = class extends import_obsidian.Plugin {
         let last = 0;
         for (const m of text.matchAll(MARKER)) {
           frag.append(text.slice(last, m.index));
-          const whole = !!m[1];
-          frag.append(this.button(whole, () => {
+          const scope = scopeOf(m);
+          frag.append(this.button(scope, () => {
             const info = ctx.getSectionInfo(el);
-            void this.resetAtMarker(file, whole, info ? info.lineStart : void 0, info ? info.lineEnd : void 0);
+            void this.resetAtMarker(file, scope, info ? info.lineStart : void 0, info ? info.lineEnd : void 0);
           }));
           last = ((_d = m.index) != null ? _d : 0) + m[0].length;
         }
@@ -98,7 +123,7 @@ var TaskResetter = class extends import_obsidian.Plugin {
         new import_obsidian.Notice("Open a note to reset its tasks.");
         return;
       }
-      void this.reset(file);
+      void this.reset(file, { kind: "all" });
     });
     this.addRibbonIcon("square-plus", "Insert reset button", () => {
       this.tap();
@@ -130,9 +155,9 @@ var TaskResetter = class extends import_obsidian.Plugin {
       (_a = navigator.vibrate) == null ? void 0 : _a.call(navigator, 20);
   }
   /** The Reset button a [reset-tasks] marker shows as. */
-  button(whole, onClick) {
+  button(scope, onClick) {
     const button = createEl("button", { cls: "reset-tasks-button" });
-    const label = whole ? "Reset all tasks" : "Reset tasks";
+    const label = labelOf(scope);
     (0, import_obsidian.setIcon)(button.createSpan({ cls: "reset-tasks-icon" }), ICON);
     button.createSpan({ cls: "reset-tasks-label", text: label });
     button.setAttr("aria-label", label);
@@ -149,9 +174,11 @@ var TaskResetter = class extends import_obsidian.Plugin {
     return button;
   }
   /** Reading view: find the marker's line within its section (the first line there that has one). */
-  async resetAtMarker(file, whole, from, to) {
-    if (whole || from === void 0 || to === void 0)
-      return this.reset(file);
+  async resetAtMarker(file, scope, from, to) {
+    if (scope.kind !== "here")
+      return this.reset(file, scope);
+    if (from === void 0 || to === void 0)
+      return this.reset(file, { kind: "all" });
     const lines = (await this.app.vault.cachedRead(file)).split("\n");
     let at = from;
     for (let i = from; i <= to && i < lines.length; i++)
@@ -159,7 +186,7 @@ var TaskResetter = class extends import_obsidian.Plugin {
         at = i;
         break;
       }
-    return this.reset(file, at);
+    return this.reset(file, scope, at);
   }
   /** The box's mark, if this line is a task that should be cleared. */
   clears(line) {
@@ -169,12 +196,16 @@ var TaskResetter = class extends import_obsidian.Plugin {
     return this.settings.clearOtherMarkers || m[2] === "x" || m[2] === "X";
   }
   /**
-   * Lines to clear. Without `at`, the whole note. With it (the line a [reset-tasks] marker is on):
-   * the section of the heading the button sits under, from the button down to the next heading of the
-   * same or a higher level, subheadings included; or the whole note if no heading is above it. Fenced
-   * code is skipped, so task-like lines in code examples are left alone.
+   * Lines to clear, or null when the scope names headings the note doesn't have. Fenced code is
+   * skipped, so task-like lines in code examples are left alone.
+   * - all: the whole note.
+   * - here (`at` is the marker's line): the section of the heading the button sits on or under, down
+   *   to the next heading of the same or a higher level, subheadings included; or the whole note if no
+   *   heading is above it.
+   * - level: every section of a heading of that level, subheadings included.
+   * - named: the section of each heading with that text (ignoring case).
    */
-  targets(lines, at) {
+  targets(lines, scope, at) {
     const fenced = [];
     let fence = false;
     for (const line of lines) {
@@ -187,35 +218,57 @@ var TaskResetter = class extends import_obsidian.Plugin {
       var _a, _b;
       return fenced[i] ? 0 : (_b = (_a = HEADING.exec(lines[i])) == null ? void 0 : _a[1].length) != null ? _b : 0;
     };
-    let from = 0, to = lines.length;
-    if (at !== void 0) {
-      let own = 0;
-      for (let i = at; i >= 0 && !own; i--)
-        own = level(i);
-      if (own) {
-        from = at + 1;
-        for (let i = from; i < lines.length; i++)
-          if (level(i) && level(i) <= own) {
-            to = i;
-            break;
-          }
+    const ranges = [];
+    const section = (h) => {
+      let to = lines.length;
+      for (let i = h + 1; i < lines.length; i++)
+        if (level(i) && level(i) <= level(h)) {
+          to = i;
+          break;
+        }
+      ranges.push([h + 1, to]);
+    };
+    if (scope.kind === "here" && at !== void 0) {
+      let own = -1;
+      for (let i = at; i >= 0 && own < 0; i--)
+        if (level(i))
+          own = i;
+      if (own >= 0)
+        section(own);
+      else
+        ranges.push([0, lines.length]);
+    } else if (scope.kind === "level" || scope.kind === "named") {
+      const name = scope.kind === "named" ? scope.name.toLowerCase() : "";
+      for (let i = 0; i < lines.length; i++) {
+        if (!level(i))
+          continue;
+        if (scope.kind === "level" ? level(i) === scope.level : headingText(lines[i]) === name)
+          section(i);
       }
+      if (!ranges.length)
+        return null;
+    } else {
+      ranges.push([0, lines.length]);
     }
-    const out = [];
-    for (let i = from; i < to; i++)
-      if (!fenced[i] && this.clears(lines[i]))
-        out.push(i);
-    return out;
+    const out = /* @__PURE__ */ new Set();
+    for (const [from, to] of ranges)
+      for (let i = from; i < to; i++)
+        if (!fenced[i] && this.clears(lines[i]))
+          out.add(i);
+    return [...out].sort((x, y) => x - y);
   }
   /** Uncheck the tasks: through the editor when the note is open there (so it's one undo), else in the file. */
-  async reset(file, at) {
+  async reset(file, scope, at) {
     const editor = this.editorFor(file);
     let count = 0;
+    let missing = false;
     let before = "", after = "";
     if (editor) {
       before = editor.getValue();
       const lines = before.split("\n");
-      const hits = this.targets(lines, at);
+      const found = this.targets(lines, scope, at);
+      missing = !found;
+      const hits = found != null ? found : [];
       count = hits.length;
       if (count) {
         editor.transaction({
@@ -233,12 +286,18 @@ var TaskResetter = class extends import_obsidian.Plugin {
       await this.app.vault.process(file, (text) => {
         before = text;
         const lines = text.split("\n");
-        const hits = this.targets(lines, at);
+        const found = this.targets(lines, scope, at);
+        missing = !found;
+        const hits = found != null ? found : [];
         count = hits.length;
         for (const line of hits)
           lines[line] = lines[line].replace(TASK, "$1 $3");
         return after = lines.join("\n");
       });
+    }
+    if (missing) {
+      new import_obsidian.Notice(scope.kind === "level" ? `No H${scope.level} headings in this note.` : `No heading named "${scope.kind === "named" ? scope.name : ""}" in this note.`);
+      return;
     }
     if (!count) {
       new import_obsidian.Notice("Nothing to uncheck.");
@@ -320,27 +379,31 @@ var TaskResetterSettings = class extends import_obsidian.PluginSettingTab {
       f.createEl("code", { text: "[reset-tasks]" });
       f.appendText(` anywhere in a note, even at the end of a heading, or use the "Insert reset button" command. Under a heading, its button unchecks that heading's section (subheadings included); above any heading it unchecks the whole note, and `);
       f.createEl("code", { text: "[reset-tasks all]" });
-      f.appendText(" always does.");
+      f.appendText(" always does. ");
+      f.createEl("code", { text: "[reset-tasks ##]" });
+      f.appendText(" unchecks every H2 section (or any level, # to ######), and ");
+      f.createEl("code", { text: "[reset-tasks: Morning]" });
+      f.appendText(" the section of the heading named Morning, wherever the button is.");
     }));
   }
 };
 var MarkerWidget = class extends import_view.WidgetType {
-  constructor(plugin, whole, line, length) {
+  constructor(plugin, scope, line, length) {
     super();
     this.plugin = plugin;
-    this.whole = whole;
+    this.scope = scope;
     this.line = line;
     this.length = length;
   }
   eq(other) {
-    return other.whole === this.whole && other.line === this.line && other.length === this.length;
+    return JSON.stringify(other.scope) === JSON.stringify(this.scope) && other.line === this.line && other.length === this.length;
   }
   toDOM(view) {
-    return this.plugin.button(this.whole, () => {
+    return this.plugin.button(this.scope, () => {
       var _a;
       const file = (_a = view.state.field(import_obsidian.editorInfoField)) == null ? void 0 : _a.file;
       if (file)
-        void this.plugin.reset(file, this.whole ? void 0 : this.line);
+        void this.plugin.reset(file, this.scope, this.line);
     });
   }
 };
@@ -373,7 +436,7 @@ function markerButtons(plugin) {
             continue;
           if (sel.some((r) => r.from <= line.to && r.to >= line.from))
             continue;
-          builder.add(start, end, import_view.Decoration.replace({ widget: new MarkerWidget(plugin, !!m[1], n - 1, m[0].length) }));
+          builder.add(start, end, import_view.Decoration.replace({ widget: new MarkerWidget(plugin, scopeOf(m), n - 1, m[0].length) }));
         }
       }
     }
@@ -390,3 +453,44 @@ function markerButtons(plugin) {
     }
   }, { decorations: (v) => v.decorations });
 }
+var HeadingSuggest = class extends import_obsidian.EditorSuggest {
+  getSuggestions(ctx) {
+    const seen = /* @__PURE__ */ new Set();
+    const out = [];
+    let fence = false;
+    for (const line of ctx.editor.getValue().split("\n")) {
+      if (/^\s*(```|~~~)/.test(line)) {
+        fence = !fence;
+        continue;
+      }
+      if (fence || !HEADING.test(line))
+        continue;
+      const text = line.replace(/^#{1,6}\s+/, "").replace(MARKER, "").replace(/\s+#+\s*$/, "").trim();
+      if (!text || seen.has(text.toLowerCase()))
+        continue;
+      seen.add(text.toLowerCase());
+      if (text.toLowerCase().includes(ctx.query.toLowerCase()))
+        out.push(text);
+    }
+    return out;
+  }
+  onTrigger(cursor, editor) {
+    const before = editor.getLine(cursor.line).slice(0, cursor.ch);
+    const m = /\[reset-tasks: *([^\]]*)$/i.exec(before);
+    if (!m)
+      return null;
+    return { start: { line: cursor.line, ch: before.length - m[1].length }, end: cursor, query: m[1] };
+  }
+  renderSuggestion(heading, el) {
+    el.setText(heading);
+  }
+  selectSuggestion(heading) {
+    const ctx = this.context;
+    if (!ctx)
+      return;
+    const { editor, start, end } = ctx;
+    const closed = editor.getLine(end.line).charAt(end.ch) === "]";
+    editor.replaceRange(heading + (closed ? "" : "]"), start, end);
+    editor.setCursor({ line: start.line, ch: start.ch + heading.length + 1 });
+  }
+};
