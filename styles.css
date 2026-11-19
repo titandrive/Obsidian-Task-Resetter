@@ -2,7 +2,6 @@
  * The Reset button in notes: an outlined button with the accent-colored icon, the same size wherever
  * it is (in a heading it keeps the interface font size instead of growing with the heading).
  */
-.block-language-reset-tasks { margin: var(--size-2-2) 0; }
 button.reset-tasks-button {
 	display: inline-flex; align-items: center; justify-content: center; gap: .45em;
 	height: 2em; padding: 0 .8em; vertical-align: middle;

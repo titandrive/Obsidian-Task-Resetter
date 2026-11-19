@@ -109,20 +109,6 @@ var TaskResetter = class extends import_obsidian.Plugin {
       }
       void this.reset(file);
     });
-    try {
-      this.registerMarkdownCodeBlockProcessor("reset-tasks", (source, el, ctx) => {
-        const whole = source.trim().toLowerCase() === "all";
-        el.append(this.button(whole, () => {
-          const file = this.app.vault.getAbstractFileByPath(ctx.sourcePath);
-          if (!(file instanceof import_obsidian.TFile))
-            return;
-          const info = ctx.getSectionInfo(el);
-          void this.reset(file, whole || !info ? void 0 : info.lineEnd);
-        }));
-      });
-    } catch (e) {
-      console.warn("Task Resetter: the reset-tasks button is taken by another plugin.", e);
-    }
   }
   /** A short, light tap on phones (Obsidian routes navigator.vibrate to the phone's haptics). */
   tap() {
@@ -130,7 +116,7 @@ var TaskResetter = class extends import_obsidian.Plugin {
     if (import_obsidian.Platform.isMobile && this.settings.haptics)
       (_a = navigator.vibrate) == null ? void 0 : _a.call(navigator, 20);
   }
-  /** The Reset button (the block's, and the [reset-tasks] marker's). */
+  /** The Reset button a [reset-tasks] marker shows as. */
   button(whole, onClick) {
     const button = createEl("button", { cls: "reset-tasks-button" });
     const label = whole ? "Reset all tasks" : "Reset tasks";
@@ -170,13 +156,12 @@ var TaskResetter = class extends import_obsidian.Plugin {
     return this.settings.clearOtherMarkers || m[2] === "x" || m[2] === "X";
   }
   /**
-   * Lines to clear. Without `blockEnd`, the whole note. With it (the last line of a button's block, or
-   * the line a [reset-tasks] marker is on):
+   * Lines to clear. Without `at`, the whole note. With it (the line a [reset-tasks] marker is on):
    * the section of the heading the button sits under, from the button down to the next heading of the
    * same or a higher level, subheadings included; or the whole note if no heading is above it. Fenced
    * code is skipped, so task-like lines in code examples are left alone.
    */
-  targets(lines, blockEnd) {
+  targets(lines, at) {
     const fenced = [];
     let fence = false;
     for (const line of lines) {
@@ -190,12 +175,12 @@ var TaskResetter = class extends import_obsidian.Plugin {
       return fenced[i] ? 0 : (_b = (_a = HEADING.exec(lines[i])) == null ? void 0 : _a[1].length) != null ? _b : 0;
     };
     let from = 0, to = lines.length;
-    if (blockEnd !== void 0) {
+    if (at !== void 0) {
       let own = 0;
-      for (let i = blockEnd; i >= 0 && !own; i--)
+      for (let i = at; i >= 0 && !own; i--)
         own = level(i);
       if (own) {
-        from = blockEnd + 1;
+        from = at + 1;
         for (let i = from; i < lines.length; i++)
           if (level(i) && level(i) <= own) {
             to = i;
@@ -210,14 +195,14 @@ var TaskResetter = class extends import_obsidian.Plugin {
     return out;
   }
   /** Uncheck the tasks: through the editor when the note is open there (so it's one undo), else in the file. */
-  async reset(file, blockEnd) {
+  async reset(file, at) {
     const editor = this.editorFor(file);
     let count = 0;
     let before = "", after = "";
     if (editor) {
       before = editor.getValue();
       const lines = before.split("\n");
-      const hits = this.targets(lines, blockEnd);
+      const hits = this.targets(lines, at);
       count = hits.length;
       if (count) {
         editor.transaction({
@@ -235,7 +220,7 @@ var TaskResetter = class extends import_obsidian.Plugin {
       await this.app.vault.process(file, (text) => {
         before = text;
         const lines = text.split("\n");
-        const hits = this.targets(lines, blockEnd);
+        const hits = this.targets(lines, at);
         count = hits.length;
         for (const line of hits)
           lines[line] = lines[line].replace(TASK, "$1 $3");
@@ -318,11 +303,11 @@ var TaskResetterSettings = class extends import_obsidian.PluginSettingTab {
     }));
     new import_obsidian.Setting(containerEl).setName("Button in a note").setHeading();
     new import_obsidian.Setting(containerEl).setDesc(createFragment((f) => {
-      f.appendText("Add a code block named reset-tasks anywhere in a note. Under a heading, its button unchecks that heading's section (subheadings included). Above any heading, or with ");
-      f.createEl("code", { text: "all" });
-      f.appendText(" written inside it, it unchecks the whole note. You can also type ");
+      f.appendText("Type ");
       f.createEl("code", { text: "[reset-tasks]" });
-      f.appendText(" anywhere, even at the end of a heading, for the same button.");
+      f.appendText(` anywhere in a note, even at the end of a heading, or use the "Insert reset button" command. Under a heading, its button unchecks that heading's section (subheadings included); above any heading it unchecks the whole note, and `);
+      f.createEl("code", { text: "[reset-tasks all]" });
+      f.appendText(" always does.");
     }));
   }
 };

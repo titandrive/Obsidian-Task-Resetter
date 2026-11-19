@@ -6,11 +6,10 @@ import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate, WidgetTy
  * Task Resetter: uncheck the tasks in a note, so a checklist can be used again.
  *
  * - The "Reset tasks in this note" command (give it a hotkey) and a sidebar button do the whole note.
- * - A reset-tasks code block puts a button in the note. Under a heading, it resets that heading's
- *   section (subheadings included, up to the next heading of the same or a higher level). Above any
- *   heading, or with `all` written inside it, it resets the whole note.
- * - Or type [reset-tasks] anywhere, even at the end of a heading: it shows as the same button
- *   ([reset-tasks all] for the whole note). Its line decides what it resets, like the block's.
+ * - [reset-tasks] typed anywhere in a note, even at the end of a heading, shows as a button. Under a
+ *   heading (or on it), it resets that heading's section: subheadings included, up to the next
+ *   heading of the same or a higher level. Above any heading it resets the whole note, and
+ *   [reset-tasks all] always does. "Insert reset button" adds one at the cursor.
  *
  * When the note is open in the editor, the reset is one edit, so Ctrl/Cmd+Z puts every check back
  * (focus goes back to the text afterwards, so it works straight away). The notice also has an Undo.
@@ -111,23 +110,6 @@ export default class TaskResetter extends Plugin {
 			if (!file || file.extension !== "md") { new Notice("Open a note to reset its tasks."); return; }
 			void this.reset(file);
 		});
-
-		// ```reset-tasks``` in a note: a button that resets the list under it (or the whole note with "all").
-		// If another plugin already owns that block name, the command and sidebar button still work.
-		try {
-			this.registerMarkdownCodeBlockProcessor("reset-tasks", (source, el, ctx) => {
-				const whole = source.trim().toLowerCase() === "all";
-				el.append(this.button(whole, () => {
-					const file = this.app.vault.getAbstractFileByPath(ctx.sourcePath);
-					if (!(file instanceof TFile)) return;
-					// Where the block is now (the note may have changed since it was drawn).
-					const info = ctx.getSectionInfo(el);
-					void this.reset(file, whole || !info ? undefined : info.lineEnd);
-				}));
-			});
-		} catch (e) {
-			console.warn("Task Resetter: the reset-tasks button is taken by another plugin.", e);
-		}
 	}
 
 	/** A short, light tap on phones (Obsidian routes navigator.vibrate to the phone's haptics). */
@@ -135,7 +117,7 @@ export default class TaskResetter extends Plugin {
 		if (Platform.isMobile && this.settings.haptics) navigator.vibrate?.(20);
 	}
 
-	/** The Reset button (the block's, and the [reset-tasks] marker's). */
+	/** The Reset button a [reset-tasks] marker shows as. */
 	button(whole: boolean, onClick: () => void): HTMLElement {
 		const button = createEl("button", { cls: "reset-tasks-button" });
 		const label = whole ? "Reset all tasks" : "Reset tasks";
@@ -166,13 +148,12 @@ export default class TaskResetter extends Plugin {
 	}
 
 	/**
-	 * Lines to clear. Without `blockEnd`, the whole note. With it (the last line of a button's block, or
-	 * the line a [reset-tasks] marker is on):
+	 * Lines to clear. Without `at`, the whole note. With it (the line a [reset-tasks] marker is on):
 	 * the section of the heading the button sits under, from the button down to the next heading of the
 	 * same or a higher level, subheadings included; or the whole note if no heading is above it. Fenced
 	 * code is skipped, so task-like lines in code examples are left alone.
 	 */
-	private targets(lines: string[], blockEnd?: number): number[] {
+	private targets(lines: string[], at?: number): number[] {
 		const fenced: boolean[] = [];
 		let fence = false;
 		for (const line of lines) {
@@ -182,11 +163,11 @@ export default class TaskResetter extends Plugin {
 		}
 		const level = (i: number) => (fenced[i] ? 0 : HEADING.exec(lines[i])?.[1].length ?? 0);
 		let from = 0, to = lines.length;
-		if (blockEnd !== undefined) {
+		if (at !== undefined) {
 			let own = 0;
-			for (let i = blockEnd; i >= 0 && !own; i--) own = level(i);
+			for (let i = at; i >= 0 && !own; i--) own = level(i);
 			if (own) {
-				from = blockEnd + 1;
+				from = at + 1;
 				for (let i = from; i < lines.length; i++) if (level(i) && level(i) <= own) { to = i; break; }
 			}
 		}
@@ -196,14 +177,14 @@ export default class TaskResetter extends Plugin {
 	}
 
 	/** Uncheck the tasks: through the editor when the note is open there (so it's one undo), else in the file. */
-	async reset(file: TFile, blockEnd?: number): Promise<void> {
+	async reset(file: TFile, at?: number): Promise<void> {
 		const editor = this.editorFor(file);
 		let count = 0;
 		let before = "", after = "";
 		if (editor) {
 			before = editor.getValue();
 			const lines = before.split("\n");
-			const hits = this.targets(lines, blockEnd);
+			const hits = this.targets(lines, at);
 			count = hits.length;
 			if (count) {
 				editor.transaction({
@@ -223,7 +204,7 @@ export default class TaskResetter extends Plugin {
 			await this.app.vault.process(file, (text) => {
 				before = text;
 				const lines = text.split("\n");
-				const hits = this.targets(lines, blockEnd);
+				const hits = this.targets(lines, at);
 				count = hits.length;
 				for (const line of hits) lines[line] = lines[line].replace(TASK, "$1 $3");
 				return (after = lines.join("\n"));
@@ -311,11 +292,11 @@ class TaskResetterSettings extends PluginSettingTab {
 			}));
 		new Setting(containerEl).setName("Button in a note").setHeading();
 		new Setting(containerEl).setDesc(createFragment((f) => {
-			f.appendText("Add a code block named reset-tasks anywhere in a note. Under a heading, its button unchecks that heading's section (subheadings included). Above any heading, or with ");
-			f.createEl("code", { text: "all" });
-			f.appendText(" written inside it, it unchecks the whole note. You can also type ");
+			f.appendText("Type ");
 			f.createEl("code", { text: "[reset-tasks]" });
-			f.appendText(" anywhere, even at the end of a heading, for the same button.");
+			f.appendText(" anywhere in a note, even at the end of a heading, or use the \"Insert reset button\" command. Under a heading, its button unchecks that heading's section (subheadings included); above any heading it unchecks the whole note, and ");
+			f.createEl("code", { text: "[reset-tasks all]" });
+			f.appendText(" always does.");
 		}));
 	}
 }
