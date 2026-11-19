@@ -25,14 +25,9 @@ interface Settings {
 	haptics: boolean;
 	/** Show the in-note buttons as just the icon, without "Reset tasks". */
 	hideLabel: boolean;
-	/**
-	 * Path data for the icons buttons use (icon: in a marker), by name, kept so the QuickNote widget,
-	 * which can't look Obsidian's icons up, can draw them too.
-	 */
-	iconPaths: Record<string, string>;
 }
 
-const DEFAULTS: Settings = { clearOtherMarkers: false, haptics: true, hideLabel: false, iconPaths: {} };
+const DEFAULTS: Settings = { clearOtherMarkers: false, haptics: true, hideLabel: false };
 
 /** The buttons' icon. */
 const ICON = "rotate-ccw-square";
@@ -105,6 +100,11 @@ export default class TaskResetter extends Plugin {
 
 	async onload(): Promise<void> {
 		this.settings = { ...DEFAULTS, ...((await this.loadData()) ?? {}) };
+		// Icon drawings an earlier build kept for the widget, which now has its own.
+		if ("iconPaths" in this.settings) {
+			delete (this.settings as Partial<Settings> & { iconPaths?: unknown }).iconPaths;
+			await this.saveSettings();
+		}
 		this.addSettingTab(new TaskResetterSettings(this.app, this));
 		this.applyLabel();
 
@@ -199,7 +199,6 @@ export default class TaskResetter extends Plugin {
 		// Its own label shows even when labels are hidden in settings: it was typed to be seen.
 		if (marker.label) button.addClass("has-own-label");
 		const icon = marker.icon && getIcon(marker.icon) ? marker.icon : ICON;
-		if (icon !== ICON) this.keepIconPath(icon);
 		setIcon(button.createSpan({ cls: "reset-tasks-icon" }), icon);
 		button.createSpan({ cls: "reset-tasks-label", text: label });
 		// Named for screen readers and a hover tooltip, which matters when the label is hidden.
@@ -209,18 +208,6 @@ export default class TaskResetter extends Plugin {
 		button.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); this.tap(); onClick(); });
 		return button;
 	}
-
-	/** Remember an icon's path data for the widget (saved once per new icon). */
-	private keepIconPath(name: string): void {
-		if (this.settings.iconPaths[name]) return;
-		const svg = getIcon(name);
-		const d = svg ? svgPath(svg) : "";
-		if (!d) return;
-		this.settings.iconPaths = { ...this.settings.iconPaths, [name]: d };
-		window.clearTimeout(this.saveSoon);
-		this.saveSoon = window.setTimeout(() => void this.saveSettings(), 1000);
-	}
-	private saveSoon = 0;
 
 	/** Reading view: find the marker's line within its section (the first line there that has one). */
 	async resetAtMarker(file: TFile, scope: Scope, from?: number, to?: number): Promise<void> {
@@ -545,38 +532,4 @@ class HeadingSuggest extends EditorSuggest<{ icon: boolean; value: string }> {
 		editor.replaceRange(item.value + (closed ? "" : "]"), start, end);
 		editor.setCursor({ line: start.line, ch: start.ch + item.value.length });
 	}
-}
-
-/** An icon's SVG as one path's data (circles, rects, lines and polylines turned into path commands). */
-function svgPath(svg: SVGSVGElement): string {
-	const n = (el: Element, a: string) => parseFloat(el.getAttribute(a) ?? "0") || 0;
-	const parts: string[] = [];
-	for (const el of Array.from(svg.querySelectorAll("path, circle, ellipse, rect, line, polyline, polygon"))) {
-		switch (el.tagName.toLowerCase()) {
-			case "path": parts.push(el.getAttribute("d") ?? ""); break;
-			case "circle": case "ellipse": {
-				const cx = n(el, "cx"), cy = n(el, "cy");
-				const rx = el.hasAttribute("r") ? n(el, "r") : n(el, "rx"), ry = el.hasAttribute("r") ? rx : n(el, "ry");
-				parts.push(`M${cx - rx} ${cy}a${rx} ${ry} 0 1 0 ${2 * rx} 0a${rx} ${ry} 0 1 0 ${-2 * rx} 0`);
-				break;
-			}
-			case "rect": {
-				const x = n(el, "x"), y = n(el, "y"), w = n(el, "width"), h = n(el, "height");
-				const r = Math.min(n(el, "rx") || n(el, "ry"), w / 2, h / 2);
-				parts.push(r
-					? `M${x + r} ${y}h${w - 2 * r}a${r} ${r} 0 0 1 ${r} ${r}v${h - 2 * r}a${r} ${r} 0 0 1 ${-r} ${r}h${-(w - 2 * r)}a${r} ${r} 0 0 1 ${-r} ${-r}v${-(h - 2 * r)}a${r} ${r} 0 0 1 ${r} ${-r}z`
-					: `M${x} ${y}h${w}v${h}h${-w}z`);
-				break;
-			}
-			case "line": parts.push(`M${n(el, "x1")} ${n(el, "y1")}L${n(el, "x2")} ${n(el, "y2")}`); break;
-			default: {
-				const pts = (el.getAttribute("points") ?? "").trim().split(/[\s,]+/).map(Number);
-				if (pts.length < 4) break;
-				let d = `M${pts[0]} ${pts[1]}`;
-				for (let i = 2; i + 1 < pts.length; i += 2) d += `L${pts[i]} ${pts[i + 1]}`;
-				parts.push(el.tagName.toLowerCase() === "polygon" ? d + "z" : d);
-			}
-		}
-	}
-	return parts.join(" ");
 }

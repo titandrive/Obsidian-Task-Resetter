@@ -30,7 +30,7 @@ module.exports = __toCommonJS(main_exports);
 var import_obsidian = require("obsidian");
 var import_state = require("@codemirror/state");
 var import_view = require("@codemirror/view");
-var DEFAULTS = { clearOtherMarkers: false, haptics: true, hideLabel: false, iconPaths: {} };
+var DEFAULTS = { clearOtherMarkers: false, haptics: true, hideLabel: false };
 var ICON = "rotate-ccw-square";
 var TASK = /^(\s*(?:[-*+]|\d+[.)])\s+\[)([^\]])(\])/;
 var MARKER = /\[reset-tasks(?=[\s:\]])([^\]\n]*)\]/gi;
@@ -86,11 +86,14 @@ var TaskResetter = class extends import_obsidian.Plugin {
   constructor() {
     super(...arguments);
     this.settings = DEFAULTS;
-    this.saveSoon = 0;
   }
   async onload() {
     var _a;
     this.settings = { ...DEFAULTS, ...(_a = await this.loadData()) != null ? _a : {} };
+    if ("iconPaths" in this.settings) {
+      delete this.settings.iconPaths;
+      await this.saveSettings();
+    }
     this.addSettingTab(new TaskResetterSettings(this.app, this));
     this.applyLabel();
     this.addCommand({
@@ -189,8 +192,6 @@ var TaskResetter = class extends import_obsidian.Plugin {
     if (marker.label)
       button.addClass("has-own-label");
     const icon = marker.icon && (0, import_obsidian.getIcon)(marker.icon) ? marker.icon : ICON;
-    if (icon !== ICON)
-      this.keepIconPath(icon);
     (0, import_obsidian.setIcon)(button.createSpan({ cls: "reset-tasks-icon" }), icon);
     button.createSpan({ cls: "reset-tasks-label", text: label });
     button.setAttr("aria-label", label);
@@ -205,18 +206,6 @@ var TaskResetter = class extends import_obsidian.Plugin {
       onClick();
     });
     return button;
-  }
-  /** Remember an icon's path data for the widget (saved once per new icon). */
-  keepIconPath(name) {
-    if (this.settings.iconPaths[name])
-      return;
-    const svg = (0, import_obsidian.getIcon)(name);
-    const d = svg ? svgPath(svg) : "";
-    if (!d)
-      return;
-    this.settings.iconPaths = { ...this.settings.iconPaths, [name]: d };
-    window.clearTimeout(this.saveSoon);
-    this.saveSoon = window.setTimeout(() => void this.saveSettings(), 1e3);
   }
   /** Reading view: find the marker's line within its section (the first line there that has one). */
   async resetAtMarker(file, scope, from, to) {
@@ -560,44 +549,3 @@ var HeadingSuggest = class extends import_obsidian.EditorSuggest {
     editor.setCursor({ line: start.line, ch: start.ch + item.value.length });
   }
 };
-function svgPath(svg) {
-  var _a, _b;
-  const n = (el, a) => {
-    var _a2;
-    return parseFloat((_a2 = el.getAttribute(a)) != null ? _a2 : "0") || 0;
-  };
-  const parts = [];
-  for (const el of Array.from(svg.querySelectorAll("path, circle, ellipse, rect, line, polyline, polygon"))) {
-    switch (el.tagName.toLowerCase()) {
-      case "path":
-        parts.push((_a = el.getAttribute("d")) != null ? _a : "");
-        break;
-      case "circle":
-      case "ellipse": {
-        const cx = n(el, "cx"), cy = n(el, "cy");
-        const rx = el.hasAttribute("r") ? n(el, "r") : n(el, "rx"), ry = el.hasAttribute("r") ? rx : n(el, "ry");
-        parts.push(`M${cx - rx} ${cy}a${rx} ${ry} 0 1 0 ${2 * rx} 0a${rx} ${ry} 0 1 0 ${-2 * rx} 0`);
-        break;
-      }
-      case "rect": {
-        const x = n(el, "x"), y = n(el, "y"), w = n(el, "width"), h = n(el, "height");
-        const r = Math.min(n(el, "rx") || n(el, "ry"), w / 2, h / 2);
-        parts.push(r ? `M${x + r} ${y}h${w - 2 * r}a${r} ${r} 0 0 1 ${r} ${r}v${h - 2 * r}a${r} ${r} 0 0 1 ${-r} ${r}h${-(w - 2 * r)}a${r} ${r} 0 0 1 ${-r} ${-r}v${-(h - 2 * r)}a${r} ${r} 0 0 1 ${r} ${-r}z` : `M${x} ${y}h${w}v${h}h${-w}z`);
-        break;
-      }
-      case "line":
-        parts.push(`M${n(el, "x1")} ${n(el, "y1")}L${n(el, "x2")} ${n(el, "y2")}`);
-        break;
-      default: {
-        const pts = ((_b = el.getAttribute("points")) != null ? _b : "").trim().split(/[\s,]+/).map(Number);
-        if (pts.length < 4)
-          break;
-        let d = `M${pts[0]} ${pts[1]}`;
-        for (let i = 2; i + 1 < pts.length; i += 2)
-          d += `L${pts[i]} ${pts[i + 1]}`;
-        parts.push(el.tagName.toLowerCase() === "polygon" ? d + "z" : d);
-      }
-    }
-  }
-  return parts.join(" ");
-}
