@@ -1,5 +1,5 @@
 {
-	"name": "reset-tasks",
+	"name": "task-resetter",
 	"version": "1.0.0",
 	"description": "Uncheck all the tasks in a note, or in one list, in Obsidian",
 	"main": "main.js",
@@ -7,7 +7,12 @@
 		"dev": "node esbuild.config.mjs",
 		"build": "node esbuild.config.mjs production"
 	},
-	"keywords": ["obsidian", "tasks", "checklist", "todo"],
+	"keywords": [
+		"obsidian",
+		"tasks",
+		"checklist",
+		"todo"
+	],
 	"author": "Jimothy",
 	"license": "MIT",
 	"devDependencies": {

@@ -1,4 +1,4 @@
-# Reset Tasks
+# Task Resetter
 
 Uncheck the tasks in a note, so a checklist can be used again.
 
@@ -26,7 +26,7 @@ Uncheck the tasks in a note, so a checklist can be used again.
 Not on the community plugin store; install it with [BRAT](https://github.com/TfTHacker/obsidian42-brat):
 
 1. Install and enable BRAT.
-2. BRAT → **Add beta plugin** → `titandrive/Obsidian-Reset-Tasks`.
-3. Enable **Reset Tasks** under Settings → Community plugins.
+2. BRAT → **Add beta plugin** → `titandrive/Obsidian-Task-Resetter`.
+3. Enable **Task Resetter** under Settings → Community plugins.
 
-Or copy `main.js`, `manifest.json` and `styles.css` into `.obsidian/plugins/reset-tasks/` in your vault.
+Or copy `main.js`, `manifest.json` and `styles.css` into `.obsidian/plugins/task-resetter/` in your vault.

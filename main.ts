@@ -1,7 +1,7 @@
 import { App, Editor, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, setIcon, TFile } from "obsidian";
 
 /*
- * Reset Tasks: uncheck the tasks in a note, so a checklist can be used again.
+ * Task Resetter: uncheck the tasks in a note, so a checklist can be used again.
  *
  * - The "Reset tasks in this note" command (give it a hotkey) and a sidebar button do the whole note.
  * - A reset-tasks code block puts a button in the note that resets just the list under it, down to
@@ -24,12 +24,12 @@ const TASK = /^(\s*(?:[-*+]|\d+[.)])\s+\[)([^\]])(\])/;
 /** A Markdown heading line (outside code blocks; callers skip fenced code). */
 const HEADING = /^#{1,6}\s/;
 
-export default class ResetTasks extends Plugin {
+export default class TaskResetter extends Plugin {
 	settings: Settings = DEFAULTS;
 
 	async onload(): Promise<void> {
 		this.settings = { ...DEFAULTS, ...((await this.loadData()) ?? {}) };
-		this.addSettingTab(new ResetTasksSettings(this.app, this));
+		this.addSettingTab(new TaskResetterSettings(this.app, this));
 
 		this.addCommand({
 			id: "reset-note",
@@ -163,8 +163,8 @@ export default class ResetTasks extends Plugin {
 	}
 }
 
-class ResetTasksSettings extends PluginSettingTab {
-	constructor(app: App, private plugin: ResetTasks) {
+class TaskResetterSettings extends PluginSettingTab {
+	constructor(app: App, private plugin: TaskResetter) {
 		super(app, plugin);
 	}
 

@@ -1,6 +1,6 @@
 {
-	"id": "reset-tasks",
-	"name": "Reset Tasks",
+	"id": "task-resetter",
+	"name": "Task Resetter",
 	"version": "1.0.0",
 	"minAppVersion": "1.4.0",
 	"description": "Uncheck all the tasks in a note, or just the list under a button you put in the note.",

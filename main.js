@@ -24,14 +24,14 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 // main.ts
 var main_exports = {};
 __export(main_exports, {
-  default: () => ResetTasks
+  default: () => TaskResetter
 });
 module.exports = __toCommonJS(main_exports);
 var import_obsidian = require("obsidian");
 var DEFAULTS = { clearOtherMarkers: false };
 var TASK = /^(\s*(?:[-*+]|\d+[.)])\s+\[)([^\]])(\])/;
 var HEADING = /^#{1,6}\s/;
-var ResetTasks = class extends import_obsidian.Plugin {
+var TaskResetter = class extends import_obsidian.Plugin {
   constructor() {
     super(...arguments);
     this.settings = DEFAULTS;
@@ -39,7 +39,7 @@ var ResetTasks = class extends import_obsidian.Plugin {
   async onload() {
     var _a;
     this.settings = { ...DEFAULTS, ...(_a = await this.loadData()) != null ? _a : {} };
-    this.addSettingTab(new ResetTasksSettings(this.app, this));
+    this.addSettingTab(new TaskResetterSettings(this.app, this));
     this.addCommand({
       id: "reset-note",
       name: "Reset tasks in this note",
@@ -180,7 +180,7 @@ var ResetTasks = class extends import_obsidian.Plugin {
     await this.saveData(this.settings);
   }
 };
-var ResetTasksSettings = class extends import_obsidian.PluginSettingTab {
+var TaskResetterSettings = class extends import_obsidian.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
