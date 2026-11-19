@@ -1,0 +1,5 @@
+/* The in-note Reset button: small and quiet, like a toolbar button. */
+.block-language-reset-tasks { margin: var(--size-2-2) 0; }
+button.reset-tasks-button { display: inline-flex; align-items: center; gap: .4em; height: auto; padding: .3em .75em; font-size: var(--font-ui-small); border-radius: var(--radius-s); cursor: pointer; }
+.reset-tasks-icon { display: flex; }
+.reset-tasks-icon svg { width: 14px; height: 14px; }
